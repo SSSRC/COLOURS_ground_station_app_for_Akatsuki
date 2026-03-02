@@ -6,12 +6,18 @@
 // needed in the renderer process.
 
 window.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("btn");
-  const status = document.getElementById("status");
+  const pEl = document.getElementById("pressure");
+  const tEl = document.getElementById("temp");
 
-  btn?.addEventListener("click", () => {
-    if (status) {
-      status.innerText = "接続成功（仮）🚀";
-    }
-  });
+  // ダミー：1秒ごとに更新
+  let p = 101325;
+  let t = 25.0;
+
+  setInterval(() => {
+    p += Math.round((Math.random() - 0.5) * 20);
+    t += (Math.random() - 0.5) * 0.1;
+
+    if (pEl) pEl.textContent = String(p);
+    if (tEl) tEl.textContent = t.toFixed(1);
+  }, 1000);
 });
