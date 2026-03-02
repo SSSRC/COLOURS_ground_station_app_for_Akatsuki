@@ -4,3 +4,14 @@
 // nodeIntegration is set to true in webPreferences.
 // Use preload.js to selectively enable features
 // needed in the renderer process.
+
+window.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("btn");
+  const status = document.getElementById("status");
+
+  btn?.addEventListener("click", () => {
+    if (status) {
+      status.innerText = "接続成功（仮）🚀";
+    }
+  });
+});
