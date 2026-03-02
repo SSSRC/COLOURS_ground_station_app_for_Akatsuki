@@ -1,5 +1,6 @@
 // 'import type' にすることで、実行時の 'exports' エラーを防ぎます
 import type * as Leaflet from 'leaflet';
+//declare const L: any;
 
 // HTML側で読み込まれた 'L' を使うことを宣言します
 declare const L: typeof Leaflet;
