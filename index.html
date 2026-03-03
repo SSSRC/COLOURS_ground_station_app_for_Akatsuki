@@ -16,9 +16,18 @@
   <body>
   <h1>COLOURS Ground Station 🚀</h1>
 
+  <h2>Serial</h2>
+  <select id="port"></select>
+  <input id="baud" value="115200" />
+  <button id="connect">接続</button>
+  <button id="disconnect">切断</button>
+  <p id="status">未接続</p>
+
   <h2>Telemetry</h2>
   <p>Pressure: <span id="pressure">---</span> Pa</p>
   <p>Temp: <span id="temp">---</span> °C</p>
+
+  <script src="./dist/renderer.js"></script>
 
   <hr />
 
