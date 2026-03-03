@@ -1,17 +1,11 @@
-// This file is required by the index.html file and will
-// be executed in the renderer process for that window.
-// No Node.js APIs are available in this process unless
-// nodeIntegration is set to true in webPreferences.
-// Use preload.js to selectively enable features
-// needed in the renderer process.
-
 window.addEventListener("DOMContentLoaded", async () => {
   const api = (window as any).api;
 
-  // ---- DOM ----
+  // -----------------------------
+  // DOM
+  // -----------------------------
   const portSel = document.getElementById("port") as HTMLSelectElement | null;
   const baudInp = document.getElementById("baud") as HTMLInputElement | null;
-
   const btnCon = document.getElementById("connect") as HTMLButtonElement | null;
   const btnDis = document.getElementById("disconnect") as HTMLButtonElement | null;
 
@@ -21,66 +15,51 @@ window.addEventListener("DOMContentLoaded", async () => {
   const aEl = document.getElementById("alt");
   const rawEl = document.getElementById("raw");
 
-  // ---- state ----
+  const canvasP = document.getElementById("chartPressure") as HTMLCanvasElement | null;
+  const canvasT = document.getElementById("chartTemp") as HTMLCanvasElement | null;
+  const canvasA = document.getElementById("chartAlt") as HTMLCanvasElement | null;
+
+  // -----------------------------
+  // state
+  // -----------------------------
   let connected = false;
 
   const setStatus = (s: string) => {
     if (statusEl) statusEl.textContent = s;
+    console.log("[status]", s);
   };
 
   const setButtons = () => {
     if (btnCon) btnCon.disabled = connected;
     if (btnDis) btnDis.disabled = !connected;
-
     if (portSel) portSel.disabled = connected;
     if (baudInp) baudInp.disabled = connected;
   };
 
-  const setTelemetry = (pressurePa?: number, tempC?: number, altM?: number) => {
-    if (typeof pressurePa === "number" && Number.isFinite(pressurePa) && pEl) {
-      pEl.textContent = String(Math.round(pressurePa));
-    }
-    if (typeof tempC === "number" && Number.isFinite(tempC) && tEl) {
-      tEl.textContent = tempC.toFixed(1);
-    }
-    if (typeof altM === "number" && Number.isFinite(altM) && aEl) {
-      aEl.textContent = altM.toFixed(2);
-    }
-  };
-
-  // 文字列から最初の数値を抜く（"ALT=12.3m" みたいなのもOK）
+  // -----------------------------
+  // helpers
+  // -----------------------------
   const extractNumber = (s: string): number => {
     const m = s.match(/-?\d+(\.\d+)?/);
     return m ? Number(m[0]) : NaN;
   };
 
-  // 受信1行を解釈する
-  // 対応:
-  //  - "101114,20.7,12.3"
-  //  - "101114,20.7"（alt無し）
-  //  - "P=101114,T=20.7,ALT=12.3"
+  // "100117,20.6,1.98" / "P=...,T=...,ALT=..." どっちでも
   const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
-    const s = line.trim();
+    const s = (line ?? "").trim();
     if (!s) return {};
-
-    // コメント行（STM32側で #... を出してる場合）
     if (s.startsWith("#")) return {};
 
-    // CSV分解
     const parts = s.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
-
-    // キー付きかどうか判定（= を含む要素があればキー付き扱い）
     const hasKey = parts.some((x) => x.includes("="));
 
     if (hasKey) {
-      // 例: "P=101114", "T=20.7", "ALT=12.3"
       const out: { p?: number; t?: number; a?: number } = {};
       for (const it of parts) {
         const [kRaw, vRaw] = it.split("=", 2);
         const k = (kRaw ?? "").trim().toUpperCase();
         const v = (vRaw ?? "").trim();
         const num = extractNumber(v);
-
         if (!Number.isFinite(num)) continue;
 
         if (k === "P" || k === "PRESS" || k === "PRESSURE") out.p = num;
@@ -90,26 +69,151 @@ window.addEventListener("DOMContentLoaded", async () => {
       return out;
     }
 
-    // ふつうのCSV: p,t,a?
-    const p = parts.length >= 1 ? extractNumber(parts[0]) : NaN;
-    const t = parts.length >= 2 ? extractNumber(parts[1]) : NaN;
-    const a = parts.length >= 3 ? extractNumber(parts[2]) : NaN;
-
     const out: { p?: number; t?: number; a?: number } = {};
-    if (Number.isFinite(p)) out.p = p;
-    if (Number.isFinite(t)) out.t = t;
-    if (Number.isFinite(a)) out.a = a;
+    if (parts.length >= 1) {
+      const p = extractNumber(parts[0]);
+      if (Number.isFinite(p)) out.p = p;
+    }
+    if (parts.length >= 2) {
+      const t = extractNumber(parts[1]);
+      if (Number.isFinite(t)) out.t = t;
+    }
+    if (parts.length >= 3) {
+      const a = extractNumber(parts[2]);
+      if (Number.isFinite(a)) out.a = a;
+    }
     return out;
   };
 
-  // ---- init UI ----
-  setStatus("未接続");
+  // -----------------------------
+  // Chart.js setup (CDN)
+  // -----------------------------
+  const C = (window as any).Chart;
+  console.log("Chart typeof:", typeof C);
+
+  const ensureCanvas = (c: HTMLCanvasElement | null, name: string) => {
+    if (!c) {
+      setStatus(`canvasが見つかりません: ${name}（index.htmlのidを確認）`);
+      return false;
+    }
+    // CSSのheightだけだと描画バッファが小さい/0になることがあるので明示
+    // 親幅に合わせて横800固定でもOKだが、まずは確実に見えるサイズにする
+    const w = Math.max(600, c.parentElement?.clientWidth ?? 600);
+    c.width = w;
+    c.height = 220;
+
+    c.style.display = "block";
+    c.style.width = "100%";
+    c.style.height = "220px";
+    c.style.background = "#fff";
+    c.style.borderRadius = "6px";
+    c.style.margin = "10px 0 30px";
+
+    return true;
+  };
+
+  if (!C) {
+    setStatus("Chart.jsが読み込めていません（index.htmlの読み込み順/CSP確認）");
+    return;
+  }
+
+  if (!ensureCanvas(canvasP, "chartPressure")) return;
+  if (!ensureCanvas(canvasT, "chartTemp")) return;
+  if (!ensureCanvas(canvasA, "chartAlt")) return;
+
+  const MAX_POINTS = 600;
+  const labels: string[] = [];
+  const dataP: number[] = [];
+  const dataT: number[] = [];
+  const dataA: number[] = [];
+
+  const nowLabel = () => new Date().toLocaleTimeString();
+
+  const trimToMax = () => {
+    while (labels.length > MAX_POINTS) {
+      labels.shift();
+      dataP.shift();
+      dataT.shift();
+      dataA.shift();
+    }
+  };
+
+  const destroyIfExists = (canvas: HTMLCanvasElement) => {
+    // Chart.js v3+ で getChart がある
+    try {
+      const existing = (C as any).getChart?.(canvas);
+      if (existing) existing.destroy();
+    } catch {}
+  };
+
+  const makeChart = (canvas: HTMLCanvasElement, label: string, data: number[]) => {
+    destroyIfExists(canvas);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    return new C(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label,
+            data,
+            tension: 0.2,
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        animation: false,
+        responsive: false, // ★ width/heightを固定したのでfalseにして確実化
+        maintainAspectRatio: false,
+        scales: {
+          x: { display: true },
+        },
+      },
+    });
+  };
+
+  const chartP = makeChart(canvasP!, "Pressure (Pa)", dataP);
+  const chartT = makeChart(canvasT!, "Temp (°C)", dataT);
+  const chartA = makeChart(canvasA!, "Alt (m)", dataA);
+
+  console.log("charts created:", !!chartP, !!chartT, !!chartA);
+  setStatus("未接続（グラフ初期化OK）");
+
+  const pushPoint = (p?: number, t?: number, a?: number) => {
+    // ★まずは P だけでも描く（真っ白を確実に回避）
+    if (!Number.isFinite(p as number)) return;
+
+    labels.push(nowLabel());
+    dataP.push(p as number);
+
+    // T/A が無ければ前回値 or 0 にする（線が途切れないように）
+    dataT.push(Number.isFinite(t as number) ? (t as number) : (dataT.length ? dataT[dataT.length - 1] : 0));
+    dataA.push(Number.isFinite(a as number) ? (a as number) : (dataA.length ? dataA[dataA.length - 1] : 0));
+
+    trimToMax();
+
+    chartP?.update();
+    chartT?.update();
+    chartA?.update();
+  };
+
+  // -----------------------------
+  // init UI
+  // -----------------------------
   setButtons();
 
-  // ---- load ports ----
-  try {
-    const ports = await api.listPorts();
-    if (portSel) {
+  // -----------------------------
+  // ports
+  // -----------------------------
+  const refreshPorts = async () => {
+    if (!portSel) return;
+    try {
+      const ports = await api.listPorts();
+      const prev = portSel.value;
+
       portSel.innerHTML = "";
       for (const p of ports as Array<{ path: string; manufacturer: string }>) {
         const opt = document.createElement("option");
@@ -117,36 +221,39 @@ window.addEventListener("DOMContentLoaded", async () => {
         opt.textContent = p.manufacturer ? `${p.path} (${p.manufacturer})` : p.path;
         portSel.appendChild(opt);
       }
+      if (prev) portSel.value = prev;
+    } catch (e: any) {
+      setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
     }
-  } catch (e: any) {
-    setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
-  }
+  };
 
-  // ---- main -> renderer ----
-  // status通知がある場合だけ使う（無い環境でも落ちない）
-  api.onStatus?.((st: string) => {
-    connected = st === "connected";
-    setStatus(connected ? "接続中（受信待ち）" : "未接続");
-    setButtons();
-  });
+  await refreshPorts();
 
+  // -----------------------------
+  // events
+  // -----------------------------
   api.onError((msg: string) => {
     console.error("serial error:", msg);
-    // 接続してない時だけ画面に強く出す（接続中は受信表示を優先）
     if (!connected) setStatus(`エラー: ${msg}`);
   });
 
   api.onLine((line: string) => {
     if (rawEl) rawEl.textContent = line;
 
-    // 受信できてるなら実質つながってる
-    if (connected) setStatus("受信中");
-
     const { p, t, a } = parseLine(line);
-    setTelemetry(p, t, a);
+    console.log("parsed:", { p, t, a });
+
+    // 数字表示
+    if (typeof p === "number" && Number.isFinite(p) && pEl) pEl.textContent = String(Math.round(p));
+    if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
+    if (typeof a === "number" && Number.isFinite(a) && aEl) aEl.textContent = a.toFixed(2);
+
+    // グラフへ（Pが来たら必ず描く）
+    pushPoint(p, t, a);
+
+    if (connected) setStatus("受信中");
   });
 
-  // ---- connect/disconnect ----
   btnCon?.addEventListener("click", async () => {
     const path = portSel?.value;
     const baud = Number(baudInp?.value ?? "115200");
@@ -155,13 +262,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     setStatus("接続中...");
     try {
       const res = await api.connect(path, baud);
-      if (res?.ok) {
-        connected = true;
-        setStatus("接続中（受信待ち）");
-      } else {
-        connected = false;
-        setStatus(`エラー: ${res?.message ?? "connect failed"}`);
-      }
+      connected = !!res?.ok;
+      setStatus(connected ? "接続中（受信待ち）" : `エラー: ${res?.message ?? "connect failed"}`);
     } catch (e: any) {
       connected = false;
       setStatus(`エラー: ${String(e?.message ?? e)}`);

@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@serialport/parser-readline": "^13.0.0",
+    "chart.js": "^4.5.1",
     "serialport": "^13.0.0"
   }
 }

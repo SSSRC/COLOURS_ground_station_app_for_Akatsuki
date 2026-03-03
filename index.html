@@ -1,43 +1,136 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Hello World!</title>
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-    <meta
-      http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-  </head>
-  <body>
+<head>
+  <meta charset="UTF-8" />
+  <title>COLOURS Ground Station</title>
+
+  <!-- CDN許可（Chart.js用） -->
+  <meta
+  http-equiv="Content-Security-Policy"
+  content="
+    default-src 'self';
+    script-src 'self' https://cdn.jsdelivr.net;
+    style-src 'self' 'unsafe-inline';
+  "
+/>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #111;
+      color: #eee;
+    }
+
+    h1 {
+      color: #4fc3f7;
+    }
+
+    h2 {
+      margin-top: 30px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+
+    select, input, button {
+      padding: 6px;
+      margin-right: 8px;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 10px;
+      font-weight: bold;
+      color: #4caf50;
+    }
+
+    .telemetry-value {
+      font-size: 22px;
+      margin: 6px 0;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 220px;
+      margin: 10px 0 30px 0;
+      background-color: #fff;
+      border-radius: 6px;
+    }
+
+    .section {
+      margin-bottom: 40px;
+    }
+
+    .raw {
+      font-size: 13px;
+      color: #aaa;
+    }
+  </style>
+</head>
+
+<body>
+
   <h1>COLOURS Ground Station 🚀</h1>
 
-  <h2>Serial</h2>
-  <select id="port"></select>
-  <input id="baud" value="115200" />
-  <button id="connect">接続</button>
-  <button id="disconnect">切断</button>
-  <p id="status">未接続</p>
+  <!-- ================= Serial ================= -->
+  <div class="section">
+    <h2>Serial</h2>
 
-  <h2>Telemetry</h2>
-  <p>Pressure: <span id="pressure">---</span> Pa</p>
-  <p>Temp: <span id="temp">---</span> °C</p>
-  <p>Alt: <span id="alt">---</span> m</p>
-  <p>Raw: <span id="raw">---</span></p>
+    <select id="port"></select>
 
+    <input id="baud" value="115200" />
+
+    <button id="connect">接続</button>
+    <button id="disconnect">切断</button>
+
+    <div id="status">未接続</div>
+  </div>
+
+  <!-- ================= Telemetry ================= -->
+  <div class="section">
+    <h2>Telemetry</h2>
+
+    <div class="telemetry-value">
+      Pressure: <span id="pressure">---</span> Pa
+    </div>
+
+    <div class="telemetry-value">
+      Temp: <span id="temp">---</span> °C
+    </div>
+
+    <div class="telemetry-value">
+      Alt: <span id="alt">---</span> m
+    </div>
+
+    <div class="raw">
+      Raw: <span id="raw">---</span>
+    </div>
+  </div>
+
+  <!-- ================= Charts ================= -->
+  <div class="section">
+    <h2>Charts</h2>
+
+    <h3>Pressure [Pa]</h3>
+    <canvas id="chartPressure"></canvas>
+
+    <h3>Temperature [°C]</h3>
+    <canvas id="chartTemp"></canvas>
+
+    <h3>Altitude [m]</h3>
+    <canvas id="chartAlt"></canvas>
+  </div>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Renderer -->
   <script src="./dist/renderer.js"></script>
 
-  <hr />
-
-  We are using Node.js <span id="node-version"></span>,
-  Chromium <span id="chrome-version"></span>,
-  and Electron <span id="electron-version"></span>.
-
-  <script src="./dist/renderer.js"></script>
 </body>
 </html>
-<!--プッシュのテスト-->
