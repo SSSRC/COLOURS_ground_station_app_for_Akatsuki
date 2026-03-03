@@ -44,7 +44,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       tEl.textContent = tempC.toFixed(1);
     }
     if (typeof altM === "number" && Number.isFinite(altM) && aEl) {
-      aEl.textContent = altM.toFixed(1);
+      aEl.textContent = altM.toFixed(2);
     }
   };
 
