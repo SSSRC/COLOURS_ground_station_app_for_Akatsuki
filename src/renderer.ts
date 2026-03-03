@@ -8,6 +8,7 @@
 window.addEventListener("DOMContentLoaded", async () => {
   const api = (window as any).api;
 
+  // ---- DOM ----
   const portSel = document.getElementById("port") as HTMLSelectElement | null;
   const baudInp = document.getElementById("baud") as HTMLInputElement | null;
 
@@ -17,8 +18,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   const statusEl = document.getElementById("status");
   const pEl = document.getElementById("pressure");
   const tEl = document.getElementById("temp");
+  const aEl = document.getElementById("alt");
   const rawEl = document.getElementById("raw");
 
+  // ---- state ----
   let connected = false;
 
   const setStatus = (s: string) => {
@@ -28,15 +31,82 @@ window.addEventListener("DOMContentLoaded", async () => {
   const setButtons = () => {
     if (btnCon) btnCon.disabled = connected;
     if (btnDis) btnDis.disabled = !connected;
+
     if (portSel) portSel.disabled = connected;
     if (baudInp) baudInp.disabled = connected;
   };
 
-  // 初期状態
+  const setTelemetry = (pressurePa?: number, tempC?: number, altM?: number) => {
+    if (typeof pressurePa === "number" && Number.isFinite(pressurePa) && pEl) {
+      pEl.textContent = String(Math.round(pressurePa));
+    }
+    if (typeof tempC === "number" && Number.isFinite(tempC) && tEl) {
+      tEl.textContent = tempC.toFixed(1);
+    }
+    if (typeof altM === "number" && Number.isFinite(altM) && aEl) {
+      aEl.textContent = altM.toFixed(1);
+    }
+  };
+
+  // 文字列から最初の数値を抜く（"ALT=12.3m" みたいなのもOK）
+  const extractNumber = (s: string): number => {
+    const m = s.match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : NaN;
+  };
+
+  // 受信1行を解釈する
+  // 対応:
+  //  - "101114,20.7,12.3"
+  //  - "101114,20.7"（alt無し）
+  //  - "P=101114,T=20.7,ALT=12.3"
+  const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
+    const s = line.trim();
+    if (!s) return {};
+
+    // コメント行（STM32側で #... を出してる場合）
+    if (s.startsWith("#")) return {};
+
+    // CSV分解
+    const parts = s.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
+
+    // キー付きかどうか判定（= を含む要素があればキー付き扱い）
+    const hasKey = parts.some((x) => x.includes("="));
+
+    if (hasKey) {
+      // 例: "P=101114", "T=20.7", "ALT=12.3"
+      const out: { p?: number; t?: number; a?: number } = {};
+      for (const it of parts) {
+        const [kRaw, vRaw] = it.split("=", 2);
+        const k = (kRaw ?? "").trim().toUpperCase();
+        const v = (vRaw ?? "").trim();
+        const num = extractNumber(v);
+
+        if (!Number.isFinite(num)) continue;
+
+        if (k === "P" || k === "PRESS" || k === "PRESSURE") out.p = num;
+        if (k === "T" || k === "TEMP" || k === "TEMPERATURE") out.t = num;
+        if (k === "ALT" || k === "ALTITUDE" || k === "H") out.a = num;
+      }
+      return out;
+    }
+
+    // ふつうのCSV: p,t,a?
+    const p = parts.length >= 1 ? extractNumber(parts[0]) : NaN;
+    const t = parts.length >= 2 ? extractNumber(parts[1]) : NaN;
+    const a = parts.length >= 3 ? extractNumber(parts[2]) : NaN;
+
+    const out: { p?: number; t?: number; a?: number } = {};
+    if (Number.isFinite(p)) out.p = p;
+    if (Number.isFinite(t)) out.t = t;
+    if (Number.isFinite(a)) out.a = a;
+    return out;
+  };
+
+  // ---- init UI ----
   setStatus("未接続");
   setButtons();
 
-  // ポート一覧を読み込む
+  // ---- load ports ----
   try {
     const ports = await api.listPorts();
     if (portSel) {
@@ -52,53 +122,39 @@ window.addEventListener("DOMContentLoaded", async () => {
     setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
   }
 
-  // main → renderer: 接続状態
+  // ---- main -> renderer ----
+  // status通知がある場合だけ使う（無い環境でも落ちない）
   api.onStatus?.((st: string) => {
     connected = st === "connected";
     setStatus(connected ? "接続中（受信待ち）" : "未接続");
     setButtons();
   });
 
-  // main → renderer: エラー
   api.onError((msg: string) => {
-    // 受信できているならconnectedのはずなので、必要以上に上書きしない
-    // ただし、未接続のままのエラーは見せる
+    console.error("serial error:", msg);
+    // 接続してない時だけ画面に強く出す（接続中は受信表示を優先）
     if (!connected) setStatus(`エラー: ${msg}`);
-    // connected中は console にも出しておくとデバッグしやすい
-    console.error(msg);
   });
 
-  // main → renderer: 受信1行
   api.onLine((line: string) => {
     if (rawEl) rawEl.textContent = line;
 
-    // 受信できている = 実質接続できている
+    // 受信できてるなら実質つながってる
     if (connected) setStatus("受信中");
 
-    // #行（STM32側のヘッダ/エラー）は無視（rawには表示される）
-    if (line.startsWith("#")) return;
-
-    // CSV: pressure_pa,temp_c
-    const parts = line.split(",");
-    if (parts.length < 2) return;
-
-    const pressure = Number(parts[0]);
-    const temp = Number(parts[1]);
-
-    if (Number.isFinite(pressure) && pEl) pEl.textContent = String(Math.round(pressure));
-    if (Number.isFinite(temp) && tEl) tEl.textContent = temp.toFixed(1);
+    const { p, t, a } = parseLine(line);
+    setTelemetry(p, t, a);
   });
 
-  // 接続ボタン
+  // ---- connect/disconnect ----
   btnCon?.addEventListener("click", async () => {
-    if (!portSel) return;
-
-    const path = portSel.value;
+    const path = portSel?.value;
     const baud = Number(baudInp?.value ?? "115200");
+    if (!path) return;
 
     setStatus("接続中...");
     try {
-      const res = await api.connect(path, baud); // {ok, message?}
+      const res = await api.connect(path, baud);
       if (res?.ok) {
         connected = true;
         setStatus("接続中（受信待ち）");
@@ -114,7 +170,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 切断ボタン
   btnDis?.addEventListener("click", async () => {
     try {
       await api.disconnect();
