@@ -1,9 +1,9 @@
 window.addEventListener("DOMContentLoaded", async () => {
   const api = (window as any).api;
 
-  // -----------------------------
+  // =============================
   // DOM
-  // -----------------------------
+  // =============================
   const portSel = document.getElementById("port") as HTMLSelectElement | null;
   const baudInp = document.getElementById("baud") as HTMLInputElement | null;
 
@@ -12,16 +12,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const statusEl = document.getElementById("status");
   const pEl = document.getElementById("pressure");
-  const tEl = document.getElementById("temp"); // 温度は数値表示だけ残す
+  const tEl = document.getElementById("temp"); // 温度は数値表示のみ（グラフなし）
   const aEl = document.getElementById("alt");
   const rawEl = document.getElementById("raw");
 
   const canvasP = document.getElementById("chartPressure") as HTMLCanvasElement | null;
   const canvasA = document.getElementById("chartAlt") as HTMLCanvasElement | null;
 
-  // -----------------------------
+  // =============================
   // state
-  // -----------------------------
+  // =============================
   let connected = false;
 
   const setStatus = (s: string) => {
@@ -36,9 +36,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (baudInp) baudInp.disabled = connected;
   };
 
-  // -----------------------------
+  // =============================
   // parsing
-  // -----------------------------
+  // =============================
   const extractNumber = (s: string): number => {
     const m = s.match(/-?\d+(\.\d+)?/);
     return m ? Number(m[0]) : NaN;
@@ -46,7 +46,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // 対応:
   //  - "101114,20.7,1.98"
-  //  - "101114,20.7"（alt無し）
+  //  - "101114,20.7"
   //  - "P=101114,T=20.7,ALT=1.98"
   const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
     const s = (line ?? "").trim();
@@ -88,13 +88,28 @@ window.addEventListener("DOMContentLoaded", async () => {
     return out;
   };
 
-  // -----------------------------
-  // Chart.js (CDN)
-  // -----------------------------
-  const C = (window as any).Chart;
+  // =============================
+  // Chart.js
+  // =============================
+  const C: any = (window as any).Chart;
   if (!C) {
-    setStatus("Chart.js が読み込めていません（index.html の読み込み順/CSPを確認）");
+    setStatus("Chart.js が読み込めていません（index.htmlの読み込み順/CSPを確認）");
     return;
+  }
+
+  console.log("=== renderer.ts LOADED ===", new Date().toISOString());
+  console.log("Chart.version =", C.version);
+
+  // ---- global fonts ----
+  // Chart.jsの全体フォントを Times New Roman に統一
+  if (C.defaults?.font) {
+    C.defaults.font.family = "Times New Roman";
+    C.defaults.font.size = 14;
+  }
+
+  // ---- global legend off (保険) ----
+  if (C.defaults?.plugins?.legend) {
+    C.defaults.plugins.legend.display = false;
   }
 
   const ensureCanvas = (c: HTMLCanvasElement | null, name: string) => {
@@ -103,13 +118,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       return false;
     }
 
-    const w = Math.max(600, c.parentElement?.clientWidth ?? 600);
+    // CSSだけだと描画バッファが合わないことがあるので明示
+    const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
     c.width = w;
-    c.height = 240;
+    c.height = 260;
 
     c.style.display = "block";
     c.style.width = "100%";
-    c.style.height = "240px";
+    c.style.height = "260px";
     c.style.background = "#fff";
     c.style.borderRadius = "6px";
     c.style.margin = "10px 0 30px";
@@ -119,6 +135,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (!ensureCanvas(canvasP, "chartPressure")) return;
   if (!ensureCanvas(canvasA, "chartAlt")) return;
 
+  // ---- data buffers ----
   const MAX_POINTS = 600;
   const labels: string[] = [];
   const dataP: number[] = [];
@@ -136,12 +153,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const destroyIfExists = (canvas: HTMLCanvasElement) => {
     try {
-      const existing = (C as any).getChart?.(canvas);
+      const existing = C.getChart?.(canvas);
       if (existing) existing.destroy();
     } catch {}
   };
 
-  const makeChart = (canvas: HTMLCanvasElement, label: string, data: number[]) => {
+  // ---- chart factory ----
+  const makeChart = (canvas: HTMLCanvasElement, title: string, data: number[]) => {
     destroyIfExists(canvas);
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
@@ -150,13 +168,61 @@ window.addEventListener("DOMContentLoaded", async () => {
       type: "line",
       data: {
         labels,
-        datasets: [{ label, data, tension: 0.2, pointRadius: 0 }],
+        datasets: [
+          {
+            label: title,
+            data,
+            tension: 0.15,
+            pointRadius: 0,
+            borderWidth: 2,
+          },
+        ],
       },
       options: {
         animation: false,
-        responsive: false, // ★確実に描画させる
+        responsive: false,
         maintainAspectRatio: false,
-        scales: { x: { display: true } },
+
+        plugins: {
+          // ★青い箱（凡例）を消す
+          legend: { display: false },
+
+          // ★グラフ内タイトルは表示
+          title: {
+            display: true,
+            text: title,
+            color: "#111",
+            font: { family: "Times New Roman", size: 18, weight: "bold" },
+            padding: { top: 8, bottom: 6 },
+          },
+        },
+
+        // ★軸の体裁（論文っぽく）
+        scales: {
+          x: {
+            grid: { display: false },
+            border: { display: true },
+            ticks: {
+              color: "#111",
+              padding: 6,
+              font: { family: "Times New Roman", size: 12 },
+            },
+            // ★内向きtick風（v4で効く）
+            // 外向きがデフォルトなので、負値にして内側に伸ばす
+            // 効かない場合は後述の代替案へ
+            tickLength: -6,
+          },
+          y: {
+            grid: { display: false },
+            border: { display: true },
+            ticks: {
+              color: "#111",
+              padding: 6,
+              font: { family: "Times New Roman", size: 12 },
+            },
+            tickLength: -6,
+          },
+        },
       },
     });
   };
@@ -165,21 +231,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   const chartA = makeChart(canvasA!, "Altitude (m)", dataA);
 
   console.log("charts created:", !!chartP, !!chartA);
-  setStatus("未接続（グラフ初期化OK）");
-  setButtons();
 
+  // ---- push data ----
   const pushPoint = (p?: number, a?: number) => {
     if (!Number.isFinite(p as number)) return;
 
     labels.push(nowLabel());
     dataP.push(p as number);
 
-    // Alt が無い時は前回値を保持（線が途切れない）
     const aVal =
       Number.isFinite(a as number)
         ? (a as number)
         : (dataA.length ? dataA[dataA.length - 1] : 0);
-
     dataA.push(aVal);
 
     trimToMax();
@@ -188,9 +251,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     chartA?.update();
   };
 
-  // -----------------------------
+  // =============================
+  // init UI
+  // =============================
+  setStatus("未接続");
+  setButtons();
+
+  // =============================
   // Ports
-  // -----------------------------
+  // =============================
   const refreshPorts = async () => {
     if (!portSel) return;
     try {
@@ -213,9 +282,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   await refreshPorts();
 
-  // -----------------------------
+  // =============================
   // Events (main -> renderer)
-  // -----------------------------
+  // =============================
   api.onError((msg: string) => {
     console.error("serial error:", msg);
     if (!connected) setStatus(`エラー: ${msg}`);
@@ -231,15 +300,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
     if (typeof a === "number" && Number.isFinite(a) && aEl) aEl.textContent = a.toFixed(2);
 
-    // グラフ（Pが来たら必ず描く）
+    // グラフ更新
     pushPoint(p, a);
 
     if (connected) setStatus("受信中");
   });
 
-  // -----------------------------
-  // Connect/Disconnect
-  // -----------------------------
+  // =============================
+  // Connect / Disconnect
+  // =============================
   btnCon?.addEventListener("click", async () => {
     const path = portSel?.value;
     const baud = Number(baudInp?.value ?? "115200");
