@@ -1,20 +1,36 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext", /* ここを "commonjs" から変更 */
-    //"module": "commonjs",
-    "skipLibCheck": true,
-    "moduleResolution": "node",
-    "strict": true,
-    "noImplicitAny": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "baseUrl": ".",
-    "paths": {
+    "target": "ESNext", //出力する JavaScript のバージョンを設定します。
+    "module": "ESNext", //出力される JavaScript がどの形式のモジュールを読み込むかを指定します。 下の esModuleInterop を true に設定しておき、ES* を指定しておくのが無難でしょう。
+    
+    //"skipLibCheck": true,
+    
+    "esModuleInterop": true, //CommonJS と ES Modules 間で相互運用可能なコードを出力します。
+    "moduleResolution": "bundler", //モジュール解決の方法を指定します。webpack を利用するので bundler を指定します。
+    "strict": true, //TypeScript による幅広い型チェックの挙動を有効化します。これだと厳しすぎる場合には、個別の strict モードファミリーを無効化する必要があります。
+    
+    //"noImplicitAny": true,
+    //"sourceMap": true,
+    //"outDir": "dist",
+    //"baseUrl": ".",
+    /*"paths": {
       "*": ["node_modules/*"]
-    }
+    }*/
+
+    //lib: 必須ではないので設定しません。target が指定されていれば、その target で使われているライブラリは自動的に追加されるからです。逆に lib を指定すると、明示的に target のどの lib を使うかも明記しなければいけなくなります。
+    "jsx": "react-jsx" //JSX 構文がどのように JavaScript ファイルに出力されるかを設定します。 .tsx で終わるファイルの JS 出力にのみ影響します。
+                        //preserve: JSX を変更せずに .jsx ファイルを出力します。
+                        //react: JSX を等価な react.createElement に変換して .js ファイルを出力します。
+                        //react-jsx: JSX を _jsx 呼び出しに変更した .js ファイルを出力します。多くのモジュールで React 本体をインポートする必要がなくなります。
   },
-  "include": [
-    "src/**/*"
-  ]
+
+  //"include": [
+  //  "src/**/*"
+  //]
+  
+  "ts-node": {  // ts-node で Node.js スクリプトを実行する（webpack.config.ts などの TypeScript で書かれた設定ファイルを評価する）には module: CommonJS の指定が必要です。
+    "compilerOptions": {
+      "module": "CommonJS"
+    }
+  }
 }
