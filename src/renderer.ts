@@ -50,9 +50,31 @@ window.addEventListener("DOMContentLoaded", async () => {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
 
-  const marker = Lobj.marker([35.0, 135.0]).addTo(map);
+  // 現在位置マーカー（大きくて見やすい赤丸）
+  const marker = Lobj.circleMarker([35.0, 135.0], {
+    radius: 12,
+    color: "#ffffff",
+    weight: 3,
+    fillColor: "#ff0000",
+    fillOpacity: 1.0,
+  }).addTo(map);
+
+  // 現在位置のまわりの薄い円
+  const halo = Lobj.circle([35.0, 135.0], {
+    radius: 10,
+    color: "#ff0000",
+    weight: 1,
+    fillColor: "#ff0000",
+    fillOpacity: 0.15,
+  }).addTo(map);
+
+  // 軌跡
   const track: [number, number][] = [];
-  const polyline = Lobj.polyline(track).addTo(map);
+  const polyline = Lobj.polyline(track, {
+    color: "#ffcc00",
+    weight: 4,
+    opacity: 0.9,
+  }).addTo(map);
 
   // =============================
   // parsing
@@ -88,11 +110,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   // =============================
   const refreshPorts = async () => {
     if (!portSel) return;
+
     try {
       const ports = await api.listPorts();
       const prev = portSel.value;
 
       portSel.innerHTML = "";
+
       for (const p of ports as Array<{ path: string; manufacturer: string }>) {
         const opt = document.createElement("option");
         opt.value = p.path;
@@ -100,7 +124,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         portSel.appendChild(opt);
       }
 
-      if (prev) portSel.value = prev;
+      if (prev) {
+        portSel.value = prev;
+      }
     } catch (e: any) {
       setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
     }
@@ -132,9 +158,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   api.onLine((line: string) => {
-    if (rawEl) rawEl.textContent = line;
-
     const s = (line ?? "").trim();
+
+    if (rawEl) rawEl.textContent = s;
 
     if (s === "GPS,NOFIX") {
       if (fixEl) fixEl.textContent = "NO FIX";
@@ -151,6 +177,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (fixEl) fixEl.textContent = "FIX";
 
     marker.setLatLng([gps.lat, gps.lon]);
+    halo.setLatLng([gps.lat, gps.lon]);
 
     track.push([gps.lat, gps.lon]);
     if (track.length > 1000) {
@@ -174,9 +201,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   btnCon?.addEventListener("click", async () => {
     const path = portSel?.value;
     const baud = Number(baudInp?.value ?? "115200");
+
     if (!path) return;
 
     setStatus("接続中...");
+
     try {
       const res = await api.connect(path, baud);
       connected = !!res?.ok;
@@ -200,7 +229,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 初期
+  // =============================
+  // initial
+  // =============================
   setStatus("未接続");
   setButtons();
 });
