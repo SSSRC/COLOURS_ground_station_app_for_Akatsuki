@@ -11,9 +11,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   const btnDis = document.getElementById("disconnect") as HTMLButtonElement | null;
 
   const statusEl = document.getElementById("status");
+
+  const latEl = document.getElementById("lat");
+  const lonEl = document.getElementById("lon");
+  const timeEl = document.getElementById("gpstime");
+  const fixEl = document.getElementById("fix");
+
   const pEl = document.getElementById("pressure");
   const tEl = document.getElementById("temp");
   const aEl = document.getElementById("alt");
+
   const rawEl = document.getElementById("raw");
 
   const canvasAlt = document.getElementById("chartAlt") as HTMLCanvasElement | null;
@@ -22,6 +29,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // state
   // =============================
   let connected = false;
+  let firstFix = true;
 
   const setStatus = (s: string) => {
     if (statusEl) statusEl.textContent = s;
@@ -36,21 +44,218 @@ window.addEventListener("DOMContentLoaded", async () => {
   };
 
   // =============================
-  // parsing
+  // Leaflet
+  // =============================
+  const Lobj = (window as any).L;
+  if (!Lobj) {
+    setStatus("Leaflet が読み込めていません");
+    return;
+  }
+
+  const map = Lobj.map("map").setView([35.0, 135.0], 5);
+
+  Lobj.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+
+  // 現在位置
+  const marker = Lobj.circleMarker([35.0, 135.0], {
+    radius: 12,
+    color: "#ffffff",
+    weight: 3,
+    fillColor: "#ff0000",
+    fillOpacity: 1.0,
+  }).addTo(map);
+
+  // 位置周辺の薄い円
+  const halo = Lobj.circle([35.0, 135.0], {
+    radius: 10,
+    color: "#ff0000",
+    weight: 1,
+    fillColor: "#ff0000",
+    fillOpacity: 0.15,
+  }).addTo(map);
+
+  // 軌跡
+  const track: [number, number][] = [];
+  const polyline = Lobj.polyline(track, {
+    color: "#ffcc00",
+    weight: 4,
+    opacity: 0.9,
+  }).addTo(map);
+
+  // =============================
+  // Chart.js
+  // =============================
+  const C: any = (window as any).Chart;
+  if (!C) {
+    setStatus("Chart.js が読み込めていません");
+    return;
+  }
+
+  if (C.defaults?.font) {
+    C.defaults.font.family = "Times New Roman";
+    C.defaults.font.size = 14;
+  }
+
+  if (C.defaults?.plugins?.legend) {
+    C.defaults.plugins.legend.display = false;
+  }
+
+  const ensureCanvas = (c: HTMLCanvasElement | null) => {
+    if (!c) {
+      setStatus("canvasが見つかりません: chartAlt");
+      return false;
+    }
+
+    const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
+    c.width = w;
+    c.height = 260;
+
+    c.style.display = "block";
+    c.style.width = "100%";
+    c.style.height = "260px";
+    c.style.background = "#fff";
+    c.style.borderRadius = "6px";
+    c.style.margin = "10px 0 30px";
+    return true;
+  };
+
+  if (!ensureCanvas(canvasAlt)) return;
+
+  const MAX_POINTS = 600;
+  const labels: string[] = [];
+  const dataAlt: number[] = [];
+
+  const nowLabel = () => new Date().toLocaleTimeString();
+
+  const trimToMax = () => {
+    while (labels.length > MAX_POINTS) {
+      labels.shift();
+      dataAlt.shift();
+    }
+  };
+
+  try {
+    const existing = C.getChart?.(canvasAlt);
+    if (existing) existing.destroy();
+  } catch {}
+
+  const ctx = canvasAlt!.getContext("2d");
+  if (!ctx) {
+    setStatus("canvasのcontextが取得できません");
+    return;
+  }
+
+  const chartAlt = new C(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Altitude (m)",
+          data: dataAlt,
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      animation: false,
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        title: {
+          display: true,
+          text: "Altitude (m)",
+          color: "#111",
+          font: { family: "Times New Roman", size: 18, weight: "bold" },
+          padding: { top: 8, bottom: 6 },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { display: true },
+          ticks: {
+            color: "#111",
+            padding: 6,
+            font: { family: "Times New Roman", size: 12 },
+          },
+          tickLength: -6,
+        },
+        y: {
+          grid: { display: false },
+          border: { display: true },
+          ticks: {
+            color: "#111",
+            padding: 6,
+            font: { family: "Times New Roman", size: 12 },
+          },
+          tickLength: -6,
+        },
+      },
+    },
+  });
+
+  const pushAlt = (a: number) => {
+    labels.push(nowLabel());
+    dataAlt.push(a);
+    trimToMax();
+    chartAlt.update();
+  };
+
+  // =============================
+  // Parsing
   // =============================
   const extractNumber = (s: string): number => {
     const m = s.match(/-?\d+(\.\d+)?/);
     return m ? Number(m[0]) : NaN;
   };
 
-  // 対応:
-  //  - "101114,20.7,1.98"
-  //  - "101114,20.7"
-  //  - "P=101114,T=20.7,ALT=1.98"
-  const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
+  const parseGpsLine = (line: string): { lat: number; lon: number; time: string } | null => {
+    const s = (line ?? "").trim();
+    if (!s) return null;
+    if (!s.startsWith("GPS,")) return null;
+
+    const parts = s.split(",").map((x) => x.trim());
+
+    if (parts.length >= 2 && parts[1] === "NOFIX") {
+      return null;
+    }
+
+    if (parts.length < 4) {
+      return null;
+    }
+
+    const lat = Number(parts[1]);
+    const lon = Number(parts[2]);
+    const time = parts[3];
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return null;
+    }
+
+    return { lat, lon, time };
+  };
+
+  const parseBaroLine = (line: string): { p?: number; t?: number; a?: number } => {
     const s = (line ?? "").trim();
     if (!s) return {};
     if (s.startsWith("#")) return {};
+    if (s.startsWith("GPS,")) return {};
+
+    // ALT,123.45 に対応
+    if (s.startsWith("ALT,")) {
+      const parts = s.split(",").map((x) => x.trim());
+      if (parts.length >= 2) {
+        const a = Number(parts[1]);
+        if (Number.isFinite(a)) return { a };
+      }
+      return {};
+    }
 
     const parts = s.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
     const hasKey = parts.some((x) => x.includes("="));
@@ -87,137 +292,54 @@ window.addEventListener("DOMContentLoaded", async () => {
     return out;
   };
 
-  // =============================
-  // Chart.js (Altitude only)
-  // =============================
-  const C: any = (window as any).Chart;
-  if (!C) {
-    setStatus("Chart.js が読み込めていません（index.htmlの読み込み順/CSPを確認）");
-    return;
-  }
+  const updateGps = (line: string) => {
+    const s = (line ?? "").trim();
 
-  console.log("=== renderer.ts LOADED ===", new Date().toISOString());
-  console.log("Chart.version =", C.version);
-
-  // global font
-  if (C.defaults?.font) {
-    C.defaults.font.family = "Times New Roman";
-    C.defaults.font.size = 14;
-  }
-
-  // legend off (保険)
-  if (C.defaults?.plugins?.legend) {
-    C.defaults.plugins.legend.display = false;
-  }
-
-  const ensureCanvas = (c: HTMLCanvasElement | null) => {
-    if (!c) {
-      setStatus("canvasが見つかりません: chartAlt（index.htmlのid確認）");
-      return false;
+    if (s === "GPS,NOFIX") {
+      if (fixEl) fixEl.textContent = "NO FIX";
+      return;
     }
 
-    const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
-    c.width = w;
-    c.height = 260;
+    const gps = parseGpsLine(s);
+    if (!gps) return;
 
-    c.style.display = "block";
-    c.style.width = "100%";
-    c.style.height = "260px";
-    c.style.background = "#fff";
-    c.style.borderRadius = "6px";
-    c.style.margin = "10px 0 30px";
-    return true;
-  };
+    if (latEl) latEl.textContent = gps.lat.toFixed(6);
+    if (lonEl) lonEl.textContent = gps.lon.toFixed(6);
+    if (timeEl) timeEl.textContent = gps.time;
+    if (fixEl) fixEl.textContent = "FIX";
 
-  if (!ensureCanvas(canvasAlt)) return;
+    marker.setLatLng([gps.lat, gps.lon]);
+    halo.setLatLng([gps.lat, gps.lon]);
 
-  const MAX_POINTS = 600;
-  const labels: string[] = [];
-  const dataAlt: number[] = [];
+    track.push([gps.lat, gps.lon]);
+    if (track.length > 1000) {
+      track.shift();
+    }
+    polyline.setLatLngs(track);
 
-  const nowLabel = () => new Date().toLocaleTimeString();
-
-  const trimToMax = () => {
-    while (labels.length > MAX_POINTS) {
-      labels.shift();
-      dataAlt.shift();
+    if (firstFix) {
+      map.setView([gps.lat, gps.lon], 17);
+      firstFix = false;
+    } else {
+      map.panTo([gps.lat, gps.lon]);
     }
   };
 
-  // 既存チャートがあれば破棄
-  try {
-    const existing = C.getChart?.(canvasAlt);
-    if (existing) existing.destroy();
-  } catch {}
+  const updateBaro = (line: string) => {
+    const { p, t, a } = parseBaroLine(line);
 
-  const ctx = canvasAlt!.getContext("2d");
-  if (!ctx) {
-    setStatus("canvasのcontextが取得できません");
-    return;
-  }
+    if (typeof p === "number" && Number.isFinite(p) && pEl) {
+      pEl.textContent = String(Math.round(p));
+    }
 
-  const chartAlt = new C(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Altitude (m)", // 凡例用（非表示）
-          data: dataAlt,
-          tension: 0.15,
-          pointRadius: 0,
-          borderWidth: 2,
-        },
-      ],
-    },
-    options: {
-      animation: false,
-      responsive: false,
-      maintainAspectRatio: false,
+    if (typeof t === "number" && Number.isFinite(t) && tEl) {
+      tEl.textContent = t.toFixed(1);
+    }
 
-      plugins: {
-        legend: { display: false }, // 青い箱を消す
-        title: {
-          display: true,
-          text: "Altitude (m)",
-          color: "#111",
-          font: { family: "Times New Roman", size: 18, weight: "bold" },
-          padding: { top: 8, bottom: 6 },
-        },
-      },
-
-      // 体裁（論文っぽく：grid無し、枠あり）
-      scales: {
-        x: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
-          },
-          // 内向きtick風（効く環境では効く）
-          tickLength: -6,
-        },
-        y: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
-          },
-          tickLength: -6,
-        },
-      },
-    },
-  });
-
-  const pushAlt = (a: number) => {
-    labels.push(nowLabel());
-    dataAlt.push(a);
-    trimToMax();
-    chartAlt.update();
+    if (typeof a === "number" && Number.isFinite(a)) {
+      if (aEl) aEl.textContent = a.toFixed(2);
+      pushAlt(a);
+    }
   };
 
   // =============================
@@ -225,11 +347,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   // =============================
   const refreshPorts = async () => {
     if (!portSel) return;
+
     try {
       const ports = await api.listPorts();
       const prev = portSel.value;
 
       portSel.innerHTML = "";
+
       for (const p of ports as Array<{ path: string; manufacturer: string }>) {
         const opt = document.createElement("option");
         opt.value = p.path;
@@ -237,7 +361,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         portSel.appendChild(opt);
       }
 
-      if (prev) portSel.value = prev;
+      if (prev) {
+        portSel.value = prev;
+      }
     } catch (e: any) {
       setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
     }
@@ -246,25 +372,35 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshPorts();
 
   // =============================
-  // Events (main -> renderer)
+  // Events
   // =============================
   api.onError((msg: string) => {
     console.error("serial error:", msg);
-    if (!connected) setStatus(`エラー: ${msg}`);
+    setStatus(`エラー: ${msg}`);
   });
 
+  if (api.onStatus) {
+    api.onStatus((st: string) => {
+      if (st === "connected") {
+        connected = true;
+        setStatus("接続中（受信待ち）");
+      } else if (st === "disconnected") {
+        connected = false;
+        setStatus("未接続");
+      } else {
+        setStatus(st);
+      }
+      setButtons();
+    });
+  }
+
   api.onLine((line: string) => {
-    if (rawEl) rawEl.textContent = line;
+    const s = (line ?? "").trim();
 
-    const { p, t, a } = parseLine(line);
+    if (rawEl) rawEl.textContent = s;
 
-    // 数値表示
-    if (typeof p === "number" && Number.isFinite(p) && pEl) pEl.textContent = String(Math.round(p));
-    if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
-    if (typeof a === "number" && Number.isFinite(a)) {
-      if (aEl) aEl.textContent = a.toFixed(2);
-      pushAlt(a);
-    }
+    updateGps(s);
+    updateBaro(s);
 
     if (connected) setStatus("受信中");
   });
@@ -275,9 +411,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   btnCon?.addEventListener("click", async () => {
     const path = portSel?.value;
     const baud = Number(baudInp?.value ?? "115200");
+
     if (!path) return;
 
     setStatus("接続中...");
+
     try {
       const res = await api.connect(path, baud);
       connected = !!res?.ok;
@@ -295,12 +433,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       await api.disconnect();
     } finally {
       connected = false;
+      firstFix = true;
       setStatus("未接続");
       setButtons();
     }
   });
 
-  // 初期
+  // =============================
+  // initial
+  // =============================
   setStatus("未接続");
   setButtons();
 });
