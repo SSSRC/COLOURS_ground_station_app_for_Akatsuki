@@ -11,17 +11,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   const btnDis = document.getElementById("disconnect") as HTMLButtonElement | null;
 
   const statusEl = document.getElementById("status");
-  const pEl = document.getElementById("pressure");
-  const tEl = document.getElementById("temp");
-  const aEl = document.getElementById("alt");
+  const latEl = document.getElementById("lat");
+  const lonEl = document.getElementById("lon");
+  const timeEl = document.getElementById("gpstime");
+  const fixEl = document.getElementById("fix");
   const rawEl = document.getElementById("raw");
-
-  const canvasAlt = document.getElementById("chartAlt") as HTMLCanvasElement | null;
 
   // =============================
   // state
   // =============================
   let connected = false;
+  let firstFix = true;
 
   const setStatus = (s: string) => {
     if (statusEl) statusEl.textContent = s;
@@ -36,188 +36,51 @@ window.addEventListener("DOMContentLoaded", async () => {
   };
 
   // =============================
+  // Leaflet
+  // =============================
+  const Lobj = (window as any).L;
+  if (!Lobj) {
+    setStatus("Leaflet が読み込めていません");
+    return;
+  }
+
+  const map = Lobj.map("map").setView([35.0, 135.0], 5);
+
+  Lobj.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+
+  const marker = Lobj.marker([35.0, 135.0]).addTo(map);
+  const track: [number, number][] = [];
+  const polyline = Lobj.polyline(track).addTo(map);
+
+  // =============================
   // parsing
   // =============================
-  const extractNumber = (s: string): number => {
-    const m = s.match(/-?\d+(\.\d+)?/);
-    return m ? Number(m[0]) : NaN;
-  };
-
-  // 対応:
-  //  - "101114,20.7,1.98"
-  //  - "101114,20.7"
-  //  - "P=101114,T=20.7,ALT=1.98"
-  const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
+  const parseGpsLine = (line: string): { lat: number; lon: number; time: string } | null => {
     const s = (line ?? "").trim();
-    if (!s) return {};
-    if (s.startsWith("#")) return {};
+    if (!s) return null;
+    if (!s.startsWith("GPS,")) return null;
 
-    const parts = s.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
-    const hasKey = parts.some((x) => x.includes("="));
+    const parts = s.split(",").map((x) => x.trim());
 
-    if (hasKey) {
-      const out: { p?: number; t?: number; a?: number } = {};
-      for (const it of parts) {
-        const [kRaw, vRaw] = it.split("=", 2);
-        const k = (kRaw ?? "").trim().toUpperCase();
-        const v = (vRaw ?? "").trim();
-        const num = extractNumber(v);
-        if (!Number.isFinite(num)) continue;
-
-        if (k === "P" || k === "PRESS" || k === "PRESSURE") out.p = num;
-        if (k === "T" || k === "TEMP" || k === "TEMPERATURE") out.t = num;
-        if (k === "ALT" || k === "ALTITUDE" || k === "H") out.a = num;
-      }
-      return out;
+    if (parts.length >= 2 && parts[1] === "NOFIX") {
+      return null;
     }
 
-    const out: { p?: number; t?: number; a?: number } = {};
-    if (parts.length >= 1) {
-      const p = extractNumber(parts[0]);
-      if (Number.isFinite(p)) out.p = p;
-    }
-    if (parts.length >= 2) {
-      const t = extractNumber(parts[1]);
-      if (Number.isFinite(t)) out.t = t;
-    }
-    if (parts.length >= 3) {
-      const a = extractNumber(parts[2]);
-      if (Number.isFinite(a)) out.a = a;
-    }
-    return out;
-  };
-
-  // =============================
-  // Chart.js (Altitude only)
-  // =============================
-  const C: any = (window as any).Chart;
-  if (!C) {
-    setStatus("Chart.js が読み込めていません（index.htmlの読み込み順/CSPを確認）");
-    return;
-  }
-
-  console.log("=== renderer.ts LOADED ===", new Date().toISOString());
-  console.log("Chart.version =", C.version);
-
-  // global font
-  if (C.defaults?.font) {
-    C.defaults.font.family = "Times New Roman";
-    C.defaults.font.size = 14;
-  }
-
-  // legend off (保険)
-  if (C.defaults?.plugins?.legend) {
-    C.defaults.plugins.legend.display = false;
-  }
-
-  const ensureCanvas = (c: HTMLCanvasElement | null) => {
-    if (!c) {
-      setStatus("canvasが見つかりません: chartAlt（index.htmlのid確認）");
-      return false;
+    if (parts.length < 4) {
+      return null;
     }
 
-    const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
-    c.width = w;
-    c.height = 260;
+    const lat = Number(parts[1]);
+    const lon = Number(parts[2]);
+    const time = parts[3];
 
-    c.style.display = "block";
-    c.style.width = "100%";
-    c.style.height = "260px";
-    c.style.background = "#fff";
-    c.style.borderRadius = "6px";
-    c.style.margin = "10px 0 30px";
-    return true;
-  };
-
-  if (!ensureCanvas(canvasAlt)) return;
-
-  const MAX_POINTS = 600;
-  const labels: string[] = [];
-  const dataAlt: number[] = [];
-
-  const nowLabel = () => new Date().toLocaleTimeString();
-
-  const trimToMax = () => {
-    while (labels.length > MAX_POINTS) {
-      labels.shift();
-      dataAlt.shift();
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return null;
     }
-  };
 
-  // 既存チャートがあれば破棄
-  try {
-    const existing = C.getChart?.(canvasAlt);
-    if (existing) existing.destroy();
-  } catch {}
-
-  const ctx = canvasAlt!.getContext("2d");
-  if (!ctx) {
-    setStatus("canvasのcontextが取得できません");
-    return;
-  }
-
-  const chartAlt = new C(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Altitude (m)", // 凡例用（非表示）
-          data: dataAlt,
-          tension: 0.15,
-          pointRadius: 0,
-          borderWidth: 2,
-        },
-      ],
-    },
-    options: {
-      animation: false,
-      responsive: false,
-      maintainAspectRatio: false,
-
-      plugins: {
-        legend: { display: false }, // 青い箱を消す
-        title: {
-          display: true,
-          text: "Altitude (m)",
-          color: "#111",
-          font: { family: "Times New Roman", size: 18, weight: "bold" },
-          padding: { top: 8, bottom: 6 },
-        },
-      },
-
-      // 体裁（論文っぽく：grid無し、枠あり）
-      scales: {
-        x: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
-          },
-          // 内向きtick風（効く環境では効く）
-          tickLength: -6,
-        },
-        y: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
-          },
-          tickLength: -6,
-        },
-      },
-    },
-  });
-
-  const pushAlt = (a: number) => {
-    labels.push(nowLabel());
-    dataAlt.push(a);
-    trimToMax();
-    chartAlt.update();
+    return { lat, lon, time };
   };
 
   // =============================
@@ -246,24 +109,60 @@ window.addEventListener("DOMContentLoaded", async () => {
   await refreshPorts();
 
   // =============================
-  // Events (main -> renderer)
+  // Events
   // =============================
   api.onError((msg: string) => {
     console.error("serial error:", msg);
-    if (!connected) setStatus(`エラー: ${msg}`);
+    setStatus(`エラー: ${msg}`);
   });
+
+  if (api.onStatus) {
+    api.onStatus((st: string) => {
+      if (st === "connected") {
+        connected = true;
+        setStatus("接続中（受信待ち）");
+      } else if (st === "disconnected") {
+        connected = false;
+        setStatus("未接続");
+      } else {
+        setStatus(st);
+      }
+      setButtons();
+    });
+  }
 
   api.onLine((line: string) => {
     if (rawEl) rawEl.textContent = line;
 
-    const { p, t, a } = parseLine(line);
+    const s = (line ?? "").trim();
 
-    // 数値表示
-    if (typeof p === "number" && Number.isFinite(p) && pEl) pEl.textContent = String(Math.round(p));
-    if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
-    if (typeof a === "number" && Number.isFinite(a)) {
-      if (aEl) aEl.textContent = a.toFixed(2);
-      pushAlt(a);
+    if (s === "GPS,NOFIX") {
+      if (fixEl) fixEl.textContent = "NO FIX";
+      if (connected) setStatus("受信中");
+      return;
+    }
+
+    const gps = parseGpsLine(s);
+    if (!gps) return;
+
+    if (latEl) latEl.textContent = gps.lat.toFixed(6);
+    if (lonEl) lonEl.textContent = gps.lon.toFixed(6);
+    if (timeEl) timeEl.textContent = gps.time;
+    if (fixEl) fixEl.textContent = "FIX";
+
+    marker.setLatLng([gps.lat, gps.lon]);
+
+    track.push([gps.lat, gps.lon]);
+    if (track.length > 1000) {
+      track.shift();
+    }
+    polyline.setLatLngs(track);
+
+    if (firstFix) {
+      map.setView([gps.lat, gps.lon], 17);
+      firstFix = false;
+    } else {
+      map.panTo([gps.lat, gps.lon]);
     }
 
     if (connected) setStatus("受信中");
@@ -295,6 +194,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       await api.disconnect();
     } finally {
       connected = false;
+      firstFix = true;
       setStatus("未接続");
       setButtons();
     }
