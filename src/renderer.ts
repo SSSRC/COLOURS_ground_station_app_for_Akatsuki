@@ -12,12 +12,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const statusEl = document.getElementById("status");
   const pEl = document.getElementById("pressure");
-  const tEl = document.getElementById("temp"); // 温度は数値表示のみ（グラフなし）
+  const tEl = document.getElementById("temp");
   const aEl = document.getElementById("alt");
   const rawEl = document.getElementById("raw");
 
-  const canvasP = document.getElementById("chartPressure") as HTMLCanvasElement | null;
-  const canvasA = document.getElementById("chartAlt") as HTMLCanvasElement | null;
+  const canvasAlt = document.getElementById("chartAlt") as HTMLCanvasElement | null;
 
   // =============================
   // state
@@ -89,7 +88,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   };
 
   // =============================
-  // Chart.js
+  // Chart.js (Altitude only)
   // =============================
   const C: any = (window as any).Chart;
   if (!C) {
@@ -100,25 +99,23 @@ window.addEventListener("DOMContentLoaded", async () => {
   console.log("=== renderer.ts LOADED ===", new Date().toISOString());
   console.log("Chart.version =", C.version);
 
-  // ---- global fonts ----
-  // Chart.jsの全体フォントを Times New Roman に統一
+  // global font
   if (C.defaults?.font) {
     C.defaults.font.family = "Times New Roman";
     C.defaults.font.size = 14;
   }
 
-  // ---- global legend off (保険) ----
+  // legend off (保険)
   if (C.defaults?.plugins?.legend) {
     C.defaults.plugins.legend.display = false;
   }
 
-  const ensureCanvas = (c: HTMLCanvasElement | null, name: string) => {
+  const ensureCanvas = (c: HTMLCanvasElement | null) => {
     if (!c) {
-      setStatus(`canvasが見つかりません: ${name}（index.htmlのid確認）`);
+      setStatus("canvasが見つかりません: chartAlt（index.htmlのid確認）");
       return false;
     }
 
-    // CSSだけだと描画バッファが合わないことがあるので明示
     const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
     c.width = w;
     c.height = 260;
@@ -132,130 +129,96 @@ window.addEventListener("DOMContentLoaded", async () => {
     return true;
   };
 
-  if (!ensureCanvas(canvasP, "chartPressure")) return;
-  if (!ensureCanvas(canvasA, "chartAlt")) return;
+  if (!ensureCanvas(canvasAlt)) return;
 
-  // ---- data buffers ----
   const MAX_POINTS = 600;
   const labels: string[] = [];
-  const dataP: number[] = [];
-  const dataA: number[] = [];
+  const dataAlt: number[] = [];
 
   const nowLabel = () => new Date().toLocaleTimeString();
 
   const trimToMax = () => {
     while (labels.length > MAX_POINTS) {
       labels.shift();
-      dataP.shift();
-      dataA.shift();
+      dataAlt.shift();
     }
   };
 
-  const destroyIfExists = (canvas: HTMLCanvasElement) => {
-    try {
-      const existing = C.getChart?.(canvas);
-      if (existing) existing.destroy();
-    } catch {}
-  };
+  // 既存チャートがあれば破棄
+  try {
+    const existing = C.getChart?.(canvasAlt);
+    if (existing) existing.destroy();
+  } catch {}
 
-  // ---- chart factory ----
-  const makeChart = (canvas: HTMLCanvasElement, title: string, data: number[]) => {
-    destroyIfExists(canvas);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
+  const ctx = canvasAlt!.getContext("2d");
+  if (!ctx) {
+    setStatus("canvasのcontextが取得できません");
+    return;
+  }
 
-    return new C(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: title,
-            data,
-            tension: 0.15,
-            pointRadius: 0,
-            borderWidth: 2,
-          },
-        ],
+  const chartAlt = new C(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Altitude (m)", // 凡例用（非表示）
+          data: dataAlt,
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      animation: false,
+      responsive: false,
+      maintainAspectRatio: false,
+
+      plugins: {
+        legend: { display: false }, // 青い箱を消す
+        title: {
+          display: true,
+          text: "Altitude (m)",
+          color: "#111",
+          font: { family: "Times New Roman", size: 18, weight: "bold" },
+          padding: { top: 8, bottom: 6 },
+        },
       },
-      options: {
-        animation: false,
-        responsive: false,
-        maintainAspectRatio: false,
 
-        plugins: {
-          // ★青い箱（凡例）を消す
-          legend: { display: false },
-
-          // ★グラフ内タイトルは表示
-          title: {
-            display: true,
-            text: title,
+      // 体裁（論文っぽく：grid無し、枠あり）
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { display: true },
+          ticks: {
             color: "#111",
-            font: { family: "Times New Roman", size: 18, weight: "bold" },
-            padding: { top: 8, bottom: 6 },
+            padding: 6,
+            font: { family: "Times New Roman", size: 12 },
           },
+          // 内向きtick風（効く環境では効く）
+          tickLength: -6,
         },
-
-        // ★軸の体裁（論文っぽく）
-        scales: {
-          x: {
-            grid: { display: false },
-            border: { display: true },
-            ticks: {
-              color: "#111",
-              padding: 6,
-              font: { family: "Times New Roman", size: 12 },
-            },
-            // ★内向きtick風（v4で効く）
-            // 外向きがデフォルトなので、負値にして内側に伸ばす
-            // 効かない場合は後述の代替案へ
-            tickLength: -6,
+        y: {
+          grid: { display: false },
+          border: { display: true },
+          ticks: {
+            color: "#111",
+            padding: 6,
+            font: { family: "Times New Roman", size: 12 },
           },
-          y: {
-            grid: { display: false },
-            border: { display: true },
-            ticks: {
-              color: "#111",
-              padding: 6,
-              font: { family: "Times New Roman", size: 12 },
-            },
-            tickLength: -6,
-          },
+          tickLength: -6,
         },
       },
-    });
-  };
+    },
+  });
 
-  const chartP = makeChart(canvasP!, "Pressure (Pa)", dataP);
-  const chartA = makeChart(canvasA!, "Altitude (m)", dataA);
-
-  console.log("charts created:", !!chartP, !!chartA);
-
-  // ---- push data ----
-  const pushPoint = (p?: number, a?: number) => {
-    if (!Number.isFinite(p as number)) return;
-
+  const pushAlt = (a: number) => {
     labels.push(nowLabel());
-    dataP.push(p as number);
-
-    const aVal =
-      Number.isFinite(a as number)
-        ? (a as number)
-        : (dataA.length ? dataA[dataA.length - 1] : 0);
-    dataA.push(aVal);
-
+    dataAlt.push(a);
     trimToMax();
-
-    chartP?.update();
-    chartA?.update();
+    chartAlt.update();
   };
-
-  // =============================
-  // init UI
-  // =============================
-  setStatus("未接続");
-  setButtons();
 
   // =============================
   // Ports
@@ -298,10 +261,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     // 数値表示
     if (typeof p === "number" && Number.isFinite(p) && pEl) pEl.textContent = String(Math.round(p));
     if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
-    if (typeof a === "number" && Number.isFinite(a) && aEl) aEl.textContent = a.toFixed(2);
-
-    // グラフ更新
-    pushPoint(p, a);
+    if (typeof a === "number" && Number.isFinite(a)) {
+      if (aEl) aEl.textContent = a.toFixed(2);
+      pushAlt(a);
+    }
 
     if (connected) setStatus("受信中");
   });
@@ -336,4 +299,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       setButtons();
     }
   });
+
+  // 初期
+  setStatus("未接続");
+  setButtons();
 });
