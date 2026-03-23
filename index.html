@@ -1,26 +1,79 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>Hello World!</title>
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-    <meta
-      http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
-  </head>
-  <body>
-    <h1>Hello World!</h1>
-    We are using Node.js <span id="node-version"></span>, Chromium
-    <span id="chrome-version"></span>, and Electron
-    <span id="electron-version"></span>.
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>卒業する先輩へのお別れメッセージ</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.8;
+            margin: 40px;
+            background-color: #f8f8f8;
+            color: #222;
+        }
 
-    <!-- You can also require other files to run in this process -->
-    <script src="./dist/renderer.js"></script>
-  </body>
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .message-box {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #333;
+            border-left: 6px solid #4a90e2;
+            padding-left: 12px;
+        }
+
+        p {
+            margin: 0 0 1em 0;
+            white-space: pre-line;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>卒業する先輩へのお別れメッセージ</h1>
+
+        <div class="message-box">
+            <h2>浅井さんへ</h2>
+            <p>
+浅井さん、ご卒業おめでとうございます。
+
+加太会計の仕事では大変お世話になりました。分からないことが多い中で、丁寧に教えていただいたおかげで、安心して業務に取り組むことができました。また、新入生の頃には親身になって対応してくださり、とても心強かったことを今でもよく覚えています。
+
+浅井さんの落ち着いた対応や周りへの気配りは、自分にとって大きな学びでした。これから自分も後輩に対して同じように接していきたいと思います。
+
+新しい環境でも、どうかお体に気をつけてご活躍ください。本当にありがとうございました。
+            </p>
+        </div>
+
+        <div class="message-box">
+            <h2>九十九さんへ</h2>
+            <p>
+九十九さん、ご卒業おめでとうございます。
+
+COLOURSの電装系開発では大変お世話になりました。電源まわりの基礎から実際の作業まで、幅広く教えていただき、本当にありがとうございました。自分一人では理解できなかった部分も、九十九さんの説明のおかげで少しずつ形にすることができました。
+
+実際の開発を通して、技術だけでなく考え方や進め方も学ばせていただき、とても貴重な経験になりました。
+
+これからのご活躍を心よりお祈りしています。本当にありがとうございました。
+            </p>
+        </div>
+    </div>
+</body>
 </html>
-<!--プッシュのテスト-->
