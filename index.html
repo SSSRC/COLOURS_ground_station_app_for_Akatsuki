@@ -1,69 +1,115 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="cyberpunk">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
   <title>Ground Station - Akatsuki</title>
   <style>
-    body { font-family: sans-serif; margin: 20px; color: #333; }
-    .row { margin-bottom: 15px; }
+    /* --- テーマ定義 --- */
+    :root[data-theme="cyberpunk"] {
+      --bg-color: #05050a; --panel-bg: rgba(15, 15, 35, 0.9); --input-bg: #000;
+      --text-color: #00f3ff; --accent-color: #00f3ff; --font-main: 'Segoe UI', sans-serif;
+      --border: 2px solid #00f3ff; --shadow: 0 0 12px #00f3ff; --danger-color: #ff0055;
+    }
+    :root[data-theme="matrix"] {
+      --bg-color: #000; --panel-bg: rgba(0, 15, 0, 0.9); --input-bg: #000;
+      --text-color: #00ff41; --accent-color: #00ff41; --font-main: 'Courier New', monospace;
+      --border: 1px solid #00ff41; --shadow: 0 0 8px #00ff41; --danger-color: #ff0000;
+    }
+    :root[data-theme="pastel"] {
+      --bg-color: #fdfbfb; --panel-bg: #ffffff; --input-bg: #f5f7fa; /* より淡い背景へ */
+      --text-color: #5a67d8; --accent-color: #a3b1ff; --font-main: 'Helvetica Neue', sans-serif;
+      --border: 2px solid #e2e8f0; --shadow: 0 4px 10px rgba(0,0,0,0.03); --danger-color: #feb2b2;
+    }
+
+    body { background-color: var(--bg-color); color: var(--text-color); font-family: var(--font-main); margin: 20px; padding-top: 60px; transition: 0.3s; }
     
-    /* パラメータ表示ブロックのスタイル */
-    .param-box { display: inline-block; margin-right: 15px; font-size: 14px; background: #e3f2fd; padding: 10px 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .param-val { display: block; font-weight: bold; font-size: 24px; color: #0277bd; margin-top: 5px; }
+    /* 右上のテーマセレクター */
+    .theme-panel { position: fixed; top: 15px; right: 20px; z-index: 1000; background: var(--panel-bg); padding: 8px 12px; border: var(--border); box-shadow: var(--shadow); border-radius: 6px; font-size: 12px; }
+    .theme-panel select { background: var(--input-bg); color: var(--text-color); border: 1px solid var(--accent-color); border-radius: 4px; padding: 3px; outline: none; }
+
+    /* パラメータ表示 (IDは維持、ラベルは英語) */
+    .param-container { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+    .param-box { flex: 1; min-width: 140px; padding: 15px; background: var(--panel-bg); border: var(--border); box-shadow: var(--shadow); border-radius: 8px; text-align: center; }
+    .param-label { display: block; font-size: 11px; text-transform: uppercase; opacity: 0.8; letter-spacing: 1px; margin-bottom: 5px; }
+    .param-val { display: block; font-weight: bold; font-size: 26px; color: var(--accent-color); }
+
+    /* グラフとログ */
+    #altitudeChart { width: 100%; max-width: 1100px; height: 320px; border: var(--border); background: rgba(0,0,0,0.2); margin-bottom: 20px; border-radius: 4px; }
+    #log { width: 100%; max-width: 1078px; height: 160px; background: #000; color: var(--text-color); padding: 12px; overflow-y: scroll; font-family: 'Consolas', monospace; border: var(--border); border-radius: 4px; font-size: 12px; }
+
+    /* ボタン */
+    .cmd-btn { padding: 10px 18px; margin-right: 6px; margin-bottom: 6px; font-weight: bold; background: rgba(0,0,0,0.1); color: var(--text-color); border: var(--border); box-shadow: var(--shadow); cursor: pointer; border-radius: 4px; font-size: 13px; transition: 0.2s; }
+    .cmd-btn:hover { background: var(--accent-color); color: var(--bg-color); box-shadow: 0 0 15px var(--accent-color); }
     
-    /* グラフとログのスタイル */
-    #altitudeChart { width: 100%; max-width: 1100px; height: 350px; border: 1px solid #ccc; background-color: #fff; }
-    #log { width: 100%; max-width: 1078px; height: 180px; background: #1e1e1e; color: #00ff00; padding: 10px; overflow-y: scroll; font-family: monospace; border-radius: 4px; }
-    
-    /* コマンドボタンのスタイル */
-    .cmd-panel { border: 2px solid #ddd; padding: 15px; border-radius: 8px; background: #fafafa; max-width: 1070px; }
-    .cmd-btn { padding: 10px 20px; margin-right: 8px; font-weight: bold; font-size: 14px; background-color: #ffca28; border: none; border-radius: 4px; cursor: pointer; box-shadow: 0 2px 0 #ff8f00; transition: 0.1s; }
-    .cmd-btn:active { transform: translateY(2px); box-shadow: none; }
-    .btn-danger { background-color: #ef5350; color: white; box-shadow: 0 2px 0 #c62828; }
+    .btn-danger { border-color: var(--danger-color) !important; color: var(--danger-color) !important; }
+    .btn-danger:hover { background: var(--danger-color) !important; color: #fff !important; animation: pulse-danger 1s infinite; }
+
+    @keyframes pulse-danger {
+      50% { box-shadow: 0 0 20px var(--danger-color), inset 0 0 10px var(--danger-color); }
+    }
+
+    /* フォーム入力 (パステル時の色を抑制) */
+    input, select#portSelect { 
+      background: var(--input-bg); color: var(--text-color); border: var(--border); 
+      padding: 6px 10px; border-radius: 4px; outline: none;
+    }
+    input:focus { border-color: var(--accent-color); }
+
+    h2 { margin-top: 0; font-weight: 300; letter-spacing: 2px; }
   </style>
 </head>
 <body>
-  <h2>Akatsuki Ground Station</h2>
 
-  <div class="row">
-    <select id="portSelect" style="padding: 5px;"></select>
-    <input id="baudRate" type="number" value="115200" style="padding: 5px; width: 80px;" />
-    <button id="refreshPortsBtn" style="padding: 5px 10px;">ポート更新</button>
-    <button id="connectBtn" style="padding: 5px 20px; font-weight: bold;">接続</button>
+  <div class="theme-panel">
+    UI_MODE: 
+    <select onchange="document.documentElement.setAttribute('data-theme', this.value)">
+      <option value="cyberpunk">CYBERPUNK</option>
+      <option value="matrix">MATRIX</option>
+      <option value="pastel">PASTEL</option>
+    </select>
   </div>
 
-  <div class="row">
-    <div class="param-box">経過時間 [ms]<span id="valTime" class="param-val">-</span></div>
-    <div class="param-box">シーケンス<span id="valPhase" class="param-val">-</span></div>
-    <div class="param-box">気圧(平均) [hPa]<span id="valPressure" class="param-val">-</span></div>
-    <div class="param-box">温度 [℃]<span id="valTemp" class="param-val">-</span></div>
-    <div class="param-box" style="background: #fff8e1;">高度 [m]<span id="valAltitude" class="param-val" style="color: #ff6f00;">-</span></div>
-    <div class="param-box" style="background: #f5f5f5;">基準 P0<span id="valP0" class="param-val" style="font-size: 18px; color:#555;">-</span></div>
-    <div class="param-box" style="background: #f5f5f5;">基準 T0<span id="valT0" class="param-val" style="font-size: 18px; color:#555;">-</span></div>
+  <h2>AKATSUKI GROUND STATION</h2>
+
+  <div class="row" style="margin-bottom: 25px;">
+    <select id="portSelect"></select>
+    <input id="baudRate" type="number" value="115200" style="width: 100px;" />
+    <button id="refreshPortsBtn" class="cmd-btn">REFRESH</button>
+    <button id="connectBtn" class="cmd-btn" style="border-width: 3px;">CONNECT</button>
   </div>
 
-  <canvas id="altitudeChart" width="1100" height="350"></canvas>
+  <div class="param-container">
+    <div class="param-box"><span class="param-label">Time [ms]</span><span id="valTime" class="param-val">-</span></div>
+    <div class="param-box"><span class="param-label">Phase</span><span id="valPhase" class="param-val">-</span></div>
+    <div class="param-box"><span class="param-label">Press [hPa]</span><span id="valPressure" class="param-val">-</span></div>
+    <div class="param-box"><span class="param-label">Temp [°C]</span><span id="valTemp" class="param-val">-</span></div>
+    <div class="param-box" style="border-color: var(--danger-color);"><span class="param-label">Alt [m]</span><span id="valAltitude" class="param-val" style="color: var(--danger-color);">-</span></div>
+    <div class="param-box"><span class="param-label">Ref P0</span><span id="valP0" class="param-val" style="font-size: 18px;">-</span></div>
+    <div class="param-box"><span class="param-label">Ref T0</span><span id="valT0" class="param-val" style="font-size: 18px;">-</span></div>
+  </div>
 
-  <div class="row cmd-panel" style="margin-top: 15px;">
-    <h3 style="margin-top: 0;">アップリンク (コマンド送信)</h3>
+  <canvas id="altitudeChart" width="1100" height="320"></canvas>
+
+  <div class="row cmd-panel" style="padding: 20px; border: var(--border); background: var(--panel-bg); border-radius: 8px;">
+    <h3 style="margin-top: 0; font-size: 16px; opacity: 0.9;">UPLINK COMMAND CONTROL</h3>
     <button class="cmd-btn" data-cmd="RESET">RESET</button>
     <button class="cmd-btn" data-cmd="READY">READY</button>
     <button class="cmd-btn" data-cmd="REC">REC</button>
     <button class="cmd-btn" data-cmd="LAUNCH">LAUNCH</button>
-    <button class="cmd-btn btn-danger" data-cmd="DEPLOY">DEPLOY (緊急展開)</button>
+    <button class="cmd-btn btn-danger" data-cmd="DEPLOY">EMERGENCY DEPLOY</button>
     <button class="cmd-btn" data-cmd="RETRY">RETRY</button>
-    <button class="cmd-btn" data-cmd="TEMP" style="background-color: #4fc3f7; box-shadow: 0 2px 0 #0277bd;">TEMP</button>
+    <button class="cmd-btn" data-cmd="TEMP">TEMP</button>
     
-    <span style="margin-left: 20px; font-weight: bold;">
-      PHASE指定: <input id="phaseInput" type="number" min="0" max="9" value="3" style="width: 50px; padding: 5px;"/>
-      <button id="sendPhaseBtn" class="cmd-btn" style="background-color: #aed581; box-shadow: 0 2px 0 #558b2f;">送信</button>
+    <span style="margin-left: 20px; font-size: 14px;">
+      PHASE_SET: <input id="phaseInput" type="number" min="0" max="9" value="3" style="width: 60px;"/>
+      <button id="sendPhaseBtn" class="cmd-btn" style="box-shadow: none;">SEND</button>
     </span>
   </div>
 
-  <div class="row">
-    <h3 style="margin-bottom: 5px;">受信ログ (生データ)</h3>
-    <pre id="log">=== システム待機中 ===\n</pre>
+  <div class="row" style="margin-top: 20px;">
+    <h3 style="font-size: 14px; margin-bottom: 8px; opacity: 0.8;">LIVE DATA STREAM</h3>
+    <pre id="log">=== STANDBY ===</pre>
   </div>
 
   <script src="dist/renderer.js"></script>
