@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>Ground Station</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 12px; }
+    #altitudeChart {
+      width: 100%;
+      max-width: 1000px;
+      height: 400px;
+      border: 1px solid #aaa;
+    }
+    .value-box {
+      font-size: 24px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ground Station</h1>
+
+  <div class="row">
+    <select id="portSelect"></select>
+    <input id="baudRate" type="number" value="115200" />
+    <button id="refreshPortsBtn">ポート更新</button>
+    <button id="connectBtn">接続</button>
+  </div>
+
+  <div class="value-box">現在シーケンス: <span id="sequenceValue">-</span></div>
+  <div class="value-box">現在高度 [m]: <span id="altitudeValue">-</span></div>
+
+  <canvas id="altitudeChart" width="1000" height="400"></canvas>
+
+  <div class="row">
+    <input id="sequenceInput" type="number" min="0" value="1" />
+    <button id="sendSequenceBtn">シーケンス遷移コマンド送信</button>
+  </div>
+
+  <div class="row">
+    <pre id="log"></pre>
+  </div>
+
+  <script type="module" src="../dist/renderer.js"></script>
+</body>
+</html>

@@ -6,9 +6,10 @@
     //"skipLibCheck": true,
     
     "esModuleInterop": true, //CommonJS と ES Modules 間で相互運用可能なコードを出力します。
-    "moduleResolution": "bundler", //モジュール解決の方法を指定します。webpack を利用するので bundler を指定します。
+    "moduleResolution": "node16", //モジュール解決の方法を指定します。webpack を利用するので bundler を指定します。
     "strict": true, //TypeScript による幅広い型チェックの挙動を有効化します。これだと厳しすぎる場合には、個別の strict モードファミリーを無効化する必要があります。
-    
+  
+
     //"noImplicitAny": true,
     //"sourceMap": true,
     //"outDir": "dist",
