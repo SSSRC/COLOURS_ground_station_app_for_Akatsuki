@@ -14,59 +14,128 @@ style-src 'self' 'unsafe-inline';
 />
 
 <style>
-
 body{
-font-family: "Times New Roman";
-margin:20px;
-background:#111;
-color:#eee;
+  font-family:"Times New Roman";
+  margin:20px;
+  background:#111;
+  color:#eee;
 }
 
 h1{
-color:#4fc3f7;
+  color:#4fc3f7;
+  margin-bottom:24px;
 }
 
 h2{
-margin-top:30px;
-border-bottom:1px solid #444;
-padding-bottom:5px;
+  margin-top:0;
+  margin-bottom:14px;
+  border-bottom:1px solid #444;
+  padding-bottom:6px;
+  color:#f5f5f5;
+}
+
+.section{
+  margin-bottom:26px;
+  padding:18px 20px;
+  background:#1a1a1a;
+  border:1px solid #333;
+  border-radius:10px;
+}
+
+.controls{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
 }
 
 select,input,button{
-padding:6px;
-margin-right:8px;
-font-size:14px;
+  padding:6px 10px;
+  font-size:14px;
+  font-family:"Times New Roman";
 }
 
 button{
-cursor:pointer;
+  cursor:pointer;
 }
 
 #status{
-margin-top:10px;
-font-weight:bold;
-color:#4caf50;
+  margin-top:10px;
+  font-weight:bold;
+  color:#4caf50;
 }
 
-.telemetry-value{
-font-size:22px;
-margin:6px 0;
+.info-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:14px;
+  margin-top:10px;
 }
 
-canvas{
-display:block;
-width:100%;
-height:260px;
-margin:10px 0 30px 0;
-background:#fff;
-border-radius:6px;
+.card{
+  background:#222;
+  border:1px solid #3a3a3a;
+  border-radius:8px;
+  padding:12px 14px;
+}
+
+.label{
+  font-size:14px;
+  color:#bdbdbd;
+  margin-bottom:6px;
+}
+
+.value{
+  font-size:24px;
+  color:#fff;
+}
+
+.subvalue{
+  font-size:18px;
+  color:#fff;
+}
+
+.raw-box{
+  margin-top:16px;
+  background:#181818;
+  border:1px solid #333;
+  border-radius:8px;
+  padding:10px 12px;
+}
+
+.raw-title{
+  font-size:14px;
+  color:#bdbdbd;
+  margin-bottom:6px;
 }
 
 .raw{
-font-size:13px;
-color:#aaa;
+  font-size:13px;
+  color:#aaa;
+  word-break:break-all;
+  line-height:1.5;
 }
 
+.chart-wrap{
+  width:100%;
+  height:320px;
+  margin-top:12px;
+}
+
+canvas{
+  display:block;
+  width:100%;
+  height:100%;
+  background:#fff;
+  border-radius:8px;
+}
+
+.note{
+  font-size:13px;
+  color:#bdbdbd;
+  margin-top:8px;
+}
 </style>
 </head>
 
@@ -74,52 +143,89 @@ color:#aaa;
 
 <h1>COLOURS Ground Station 🚀</h1>
 
-<div>
+<div class="section">
+  <h2>Serial</h2>
 
-<h2>Serial</h2>
+  <div class="controls">
+    <button id="refreshPortsBtn">更新</button>
 
-<select id="port"></select>
-<input id="baud" value="115200"/>
+    <select id="portSelect">
+      <option value="">No ports</option>
+    </select>
 
-<button id="connect">接続</button>
-<button id="disconnect">切断</button>
+    <input id="baudRate" value="115200" />
 
-<div id="status">未接続</div>
+    <button id="connectBtn">接続</button>
+    <button id="disconnectBtn">切断</button>
+  </div>
 
+  <div id="status">Status: Waiting for sequence 2</div>
 </div>
 
-<div>
+<div class="section">
+  <h2>Telemetry</h2>
 
-<h2>Telemetry</h2>
+  <div class="info-grid">
+    <div class="card">
+      <div class="label">Sequence</div>
+      <div class="value" id="seq">--</div>
+    </div>
 
-<div class="telemetry-value">
-Pressure: <span id="pressure">---</span> Pa
+    <div class="card">
+      <div class="label">Altitude</div>
+      <div class="value" id="altitude">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Temperature</div>
+      <div class="subvalue" id="temperature">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Latitude</div>
+      <div class="subvalue" id="latitude">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Longitude</div>
+      <div class="subvalue" id="longitude">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">RSSI</div>
+      <div class="subvalue" id="rssi">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Baseline p0</div>
+      <div class="subvalue" id="p0">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Baseline T0</div>
+      <div class="subvalue" id="T0">--</div>
+    </div>
+  </div>
+
+  <div class="raw-box">
+    <div class="raw-title">Raw Line</div>
+    <div class="raw" id="rawLine">--</div>
+  </div>
 </div>
 
-<div class="telemetry-value">
-Temp: <span id="temp">---</span> °C
-</div>
+<div class="section">
+  <h2>Altitude Graph</h2>
 
-<div class="telemetry-value">
-Alt: <span id="alt">---</span> m
-</div>
+  <div class="chart-wrap">
+    <canvas id="altitudeChart"></canvas>
+  </div>
 
-<div class="raw">
-Raw: <span id="raw">---</span>
-</div>
-
-</div>
-
-<div>
-
-<h2>Altitude Graph</h2>
-
-<canvas id="chartAlt"></canvas>
-
+  <div class="note">
+    seq = 2 に入った瞬間から5秒間の平均値で p0，T0 を決定します．
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script src="./dist/renderer.js"></script>
 
 </body>

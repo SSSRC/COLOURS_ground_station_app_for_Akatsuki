@@ -1,306 +1,478 @@
-window.addEventListener("DOMContentLoaded", async () => {
-  const api = (window as any).api;
+type TelemetryData = {
+  time: number;
+  seq: number;
+  pressures: number[];
+  temperature: number;
+  lat: number;
+  lon: number;
+  rssi: number;
+};
 
-  // =============================
-  // DOM
-  // =============================
-  const portSel = document.getElementById("port") as HTMLSelectElement | null;
-  const baudInp = document.getElementById("baud") as HTMLInputElement | null;
+type ChartLike = any;
 
-  const btnCon = document.getElementById("connect") as HTMLButtonElement | null;
-  const btnDis = document.getElementById("disconnect") as HTMLButtonElement | null;
+const MAX_POINTS = 1200;
+const PRESSURE_COUNT = 25;
+const PRESSURE_DT = 0.02;
+const BASELINE_PACKET_COUNT = 10;
 
-  const statusEl = document.getElementById("status");
-  const pEl = document.getElementById("pressure");
-  const tEl = document.getElementById("temp");
-  const aEl = document.getElementById("alt");
-  const rawEl = document.getElementById("raw");
+let altitudeChart: ChartLike | null = null;
 
-  const canvasAlt = document.getElementById("chartAlt") as HTMLCanvasElement | null;
+// --------------------
+// DOM
+// --------------------
+const portSelect = document.getElementById("portSelect") as HTMLSelectElement | null;
+const refreshBtn = document.getElementById("refreshPortsBtn") as HTMLButtonElement | null;
+const connectBtn = document.getElementById("connectBtn") as HTMLButtonElement | null;
+const disconnectBtn = document.getElementById("disconnectBtn") as HTMLButtonElement | null;
+const baudInput = document.getElementById("baudRate") as HTMLInputElement | null;
 
-  // =============================
-  // state
-  // =============================
-  let connected = false;
+const statusEl = document.getElementById("status");
+const seqEl = document.getElementById("seq");
+const altitudeEl = document.getElementById("altitude");
+const tempEl = document.getElementById("temperature");
+const latEl = document.getElementById("latitude");
+const lonEl = document.getElementById("longitude");
+const rssiEl = document.getElementById("rssi");
+const p0El = document.getElementById("p0");
+const T0El = document.getElementById("T0");
+const rawLineEl = document.getElementById("rawLine");
 
-  const setStatus = (s: string) => {
-    if (statusEl) statusEl.textContent = s;
-    console.log("[status]", s);
+const altitudeCanvas = document.getElementById("altitudeChart") as HTMLCanvasElement | null;
+
+// --------------------
+// 基準値管理
+// --------------------
+let baselineStarted = false;
+let baselineFixed = false;
+let baselinePacketCounter = 0;
+
+const baselinePressures: number[] = [];
+const baselineTemps: number[] = [];
+
+let p0 = 0;
+let T0 = 0;
+
+// --------------------
+// 共通関数
+// --------------------
+function setText(el: HTMLElement | null, text: string): void {
+  if (el) {
+    el.textContent = text;
+  }
+}
+
+function mean(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function formatNum(x: number, digits = 2): string {
+  return Number.isFinite(x) ? x.toFixed(digits) : "--";
+}
+
+// --------------------
+// 高度計算
+// h = ((T0 + 273.15) / 0.0065) * [1 - (p/p0)^(1/5.257)]
+// p, p0 は同じ単位であればよい
+// --------------------
+function calcAltitude(p: number, p0val: number, T0val: number): number {
+  if (!Number.isFinite(p) || !Number.isFinite(p0val) || !Number.isFinite(T0val)) {
+    return NaN;
+  }
+
+  if (p <= 0 || p0val <= 0) {
+    return NaN;
+  }
+
+  return ((T0val + 273.15) / 0.0065) * (1 - Math.pow(p / p0val, 1 / 5.257));
+}
+
+// --------------------
+// LoRa受信文字列パース
+// 形式:
+// time, seq, p1..p25, temp, lat, lon, rssi
+// 合計31項目
+// --------------------
+function parseLoRaLine(line: string): TelemetryData | null {
+  const parts = line.trim().split(",");
+
+  if (parts.length !== 31) {
+    console.warn("Invalid field count:", parts.length, line);
+    return null;
+  }
+
+  const time = Number(parts[0]);
+  const seq = Number(parts[1]);
+  const pressures = parts.slice(2, 27).map(Number);
+  const temperature = Number(parts[27]);
+  const lat = Number(parts[28]);
+  const lon = Number(parts[29]);
+  const rssi = Number(parts[30]);
+
+  const values = [time, seq, ...pressures, temperature, lat, lon, rssi];
+  if (values.some((v) => Number.isNaN(v))) {
+    console.warn("NaN found in line:", line);
+    return null;
+  }
+
+  if (pressures.length !== PRESSURE_COUNT) {
+    console.warn("Pressure count mismatch:", pressures.length);
+    return null;
+  }
+
+  return {
+    time,
+    seq,
+    pressures,
+    temperature,
+    lat,
+    lon,
+    rssi,
   };
+}
 
-  const setButtons = () => {
-    if (btnCon) btnCon.disabled = connected;
-    if (btnDis) btnDis.disabled = !connected;
-    if (portSel) portSel.disabled = connected;
-    if (baudInp) baudInp.disabled = connected;
-  };
-
-  // =============================
-  // parsing
-  // =============================
-  const extractNumber = (s: string): number => {
-    const m = s.match(/-?\d+(\.\d+)?/);
-    return m ? Number(m[0]) : NaN;
-  };
-
-  // 対応:
-  //  - "101114,20.7,1.98"
-  //  - "101114,20.7"
-  //  - "P=101114,T=20.7,ALT=1.98"
-  const parseLine = (line: string): { p?: number; t?: number; a?: number } => {
-    const s = (line ?? "").trim();
-    if (!s) return {};
-    if (s.startsWith("#")) return {};
-
-    const parts = s.split(",").map((x) => x.trim()).filter((x) => x.length > 0);
-    const hasKey = parts.some((x) => x.includes("="));
-
-    if (hasKey) {
-      const out: { p?: number; t?: number; a?: number } = {};
-      for (const it of parts) {
-        const [kRaw, vRaw] = it.split("=", 2);
-        const k = (kRaw ?? "").trim().toUpperCase();
-        const v = (vRaw ?? "").trim();
-        const num = extractNumber(v);
-        if (!Number.isFinite(num)) continue;
-
-        if (k === "P" || k === "PRESS" || k === "PRESSURE") out.p = num;
-        if (k === "T" || k === "TEMP" || k === "TEMPERATURE") out.t = num;
-        if (k === "ALT" || k === "ALTITUDE" || k === "H") out.a = num;
-      }
-      return out;
-    }
-
-    const out: { p?: number; t?: number; a?: number } = {};
-    if (parts.length >= 1) {
-      const p = extractNumber(parts[0]);
-      if (Number.isFinite(p)) out.p = p;
-    }
-    if (parts.length >= 2) {
-      const t = extractNumber(parts[1]);
-      if (Number.isFinite(t)) out.t = t;
-    }
-    if (parts.length >= 3) {
-      const a = extractNumber(parts[2]);
-      if (Number.isFinite(a)) out.a = a;
-    }
-    return out;
-  };
-
-  // =============================
-  // Chart.js (Altitude only)
-  // =============================
-  const C: any = (window as any).Chart;
-  if (!C) {
-    setStatus("Chart.js が読み込めていません（index.htmlの読み込み順/CSPを確認）");
+// --------------------
+// Chart.js 初期化
+// --------------------
+function createAltitudeChart(): void {
+  if (!altitudeCanvas) {
+    console.error("altitudeChart canvas not found");
     return;
   }
 
-  console.log("=== renderer.ts LOADED ===", new Date().toISOString());
-  console.log("Chart.version =", C.version);
-
-  // global font
-  if (C.defaults?.font) {
-    C.defaults.font.family = "Times New Roman";
-    C.defaults.font.size = 14;
-  }
-
-  // legend off (保険)
-  if (C.defaults?.plugins?.legend) {
-    C.defaults.plugins.legend.display = false;
-  }
-
-  const ensureCanvas = (c: HTMLCanvasElement | null) => {
-    if (!c) {
-      setStatus("canvasが見つかりません: chartAlt（index.htmlのid確認）");
-      return false;
-    }
-
-    const w = Math.max(700, c.parentElement?.clientWidth ?? 700);
-    c.width = w;
-    c.height = 260;
-
-    c.style.display = "block";
-    c.style.width = "100%";
-    c.style.height = "260px";
-    c.style.background = "#fff";
-    c.style.borderRadius = "6px";
-    c.style.margin = "10px 0 30px";
-    return true;
-  };
-
-  if (!ensureCanvas(canvasAlt)) return;
-
-  const MAX_POINTS = 600;
-  const labels: string[] = [];
-  const dataAlt: number[] = [];
-
-  const nowLabel = () => new Date().toLocaleTimeString();
-
-  const trimToMax = () => {
-    while (labels.length > MAX_POINTS) {
-      labels.shift();
-      dataAlt.shift();
-    }
-  };
-
-  // 既存チャートがあれば破棄
-  try {
-    const existing = C.getChart?.(canvasAlt);
-    if (existing) existing.destroy();
-  } catch {}
-
-  const ctx = canvasAlt!.getContext("2d");
-  if (!ctx) {
-    setStatus("canvasのcontextが取得できません");
+  const ChartRef = (window as any).Chart;
+  if (!ChartRef) {
+    console.error("Chart.js is not loaded");
     return;
   }
 
-  const chartAlt = new C(ctx, {
+  altitudeChart = new ChartRef(altitudeCanvas, {
     type: "line",
     data: {
-      labels,
+      labels: [],
       datasets: [
         {
-          label: "Altitude (m)", // 凡例用（非表示）
-          data: dataAlt,
-          tension: 0.15,
+          label: "Altitude [m]",
+          data: [],
+          borderWidth: 1.5,
           pointRadius: 0,
-          borderWidth: 2,
+          tension: 0,
         },
       ],
     },
     options: {
-      animation: false,
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
-
+      animation: false,
       plugins: {
-        legend: { display: false }, // 青い箱を消す
+        legend: {
+          display: true,
+          labels: {
+            color: "#000",
+            font: {
+              family: "Times New Roman",
+              size: 14,
+            },
+          },
+        },
         title: {
           display: true,
-          text: "Altitude (m)",
-          color: "#111",
-          font: { family: "Times New Roman", size: 18, weight: "bold" },
-          padding: { top: 8, bottom: 6 },
+          text: "Altitude",
+          color: "#000",
+          font: {
+            family: "Times New Roman",
+            size: 18,
+          },
         },
       },
-
-      // 体裁（論文っぽく：grid無し、枠あり）
       scales: {
         x: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
+          title: {
+            display: true,
+            text: "Time [s]",
+            color: "#000",
+            font: {
+              family: "Times New Roman",
+              size: 14,
+            },
           },
-          // 内向きtick風（効く環境では効く）
-          tickLength: -6,
+          ticks: {
+            color: "#000",
+            maxTicksLimit: 10,
+            font: {
+              family: "Times New Roman",
+              size: 12,
+            },
+          },
+          grid: {
+            color: "#cccccc",
+          },
+          border: {
+            color: "#000",
+          },
         },
         y: {
-          grid: { display: false },
-          border: { display: true },
-          ticks: {
-            color: "#111",
-            padding: 6,
-            font: { family: "Times New Roman", size: 12 },
+          title: {
+            display: true,
+            text: "Altitude [m]",
+            color: "#000",
+            font: {
+              family: "Times New Roman",
+              size: 14,
+            },
           },
-          tickLength: -6,
+          ticks: {
+            color: "#000",
+            font: {
+              family: "Times New Roman",
+              size: 12,
+            },
+          },
+          grid: {
+            color: "#cccccc",
+          },
+          border: {
+            color: "#000",
+          },
         },
       },
     },
   });
+}
 
-  const pushAlt = (a: number) => {
-    labels.push(nowLabel());
-    dataAlt.push(a);
-    trimToMax();
-    chartAlt.update();
-  };
+// --------------------
+// 基準値更新
+// seq=2 に初めて入った瞬間から10パケット収集
+// p0: 10パケット×25点の平均
+// T0: 10パケット分のtemp平均
+// --------------------
+function updateBaseline(data: TelemetryData): void {
+  if (!baselineStarted && data.seq === 2) {
+    baselineStarted = true;
+    baselineFixed = false;
+    baselinePacketCounter = 0;
+    baselinePressures.length = 0;
+    baselineTemps.length = 0;
 
-  // =============================
-  // Ports
-  // =============================
-  const refreshPorts = async () => {
-    if (!portSel) return;
-    try {
-      const ports = await api.listPorts();
-      const prev = portSel.value;
+    setText(statusEl, "Status: Collecting baseline...");
+    console.log("Baseline collection started");
+  }
 
-      portSel.innerHTML = "";
-      for (const p of ports as Array<{ path: string; manufacturer: string }>) {
-        const opt = document.createElement("option");
-        opt.value = p.path;
-        opt.textContent = p.manufacturer ? `${p.path} (${p.manufacturer})` : p.path;
-        portSel.appendChild(opt);
-      }
+  if (baselineStarted && !baselineFixed) {
+    baselinePressures.push(...data.pressures);
+    baselineTemps.push(data.temperature);
+    baselinePacketCounter++;
 
-      if (prev) portSel.value = prev;
-    } catch (e: any) {
-      setStatus(`ポート一覧取得失敗: ${String(e?.message ?? e)}`);
+    setText(
+      statusEl,
+      `Status: Collecting baseline... ${baselinePacketCounter}/${BASELINE_PACKET_COUNT}`
+    );
+
+    if (baselinePacketCounter >= BASELINE_PACKET_COUNT) {
+      p0 = mean(baselinePressures);
+      T0 = mean(baselineTemps);
+      baselineFixed = true;
+
+      setText(p0El, `${formatNum(p0, 2)} hPa`);
+      setText(T0El, `${formatNum(T0, 2)} °C`);
+      setText(statusEl, "Status: Baseline fixed");
+
+      console.log(`Baseline fixed: p0=${p0}, T0=${T0}`);
     }
-  };
+  }
+}
 
-  await refreshPorts();
+// --------------------
+// グラフ更新
+// time はその行の最後のサンプル時刻
+// pressures[0]  -> time - 0.48
+// pressures[24] -> time
+// --------------------
+function appendPacketToAltitudeGraph(data: TelemetryData): void {
+  if (!altitudeChart || !baselineFixed) return;
 
-  // =============================
-  // Events (main -> renderer)
-  // =============================
-  api.onError((msg: string) => {
-    console.error("serial error:", msg);
-    if (!connected) setStatus(`エラー: ${msg}`);
+  for (let i = 0; i < data.pressures.length; i++) {
+    const p = data.pressures[i];
+    const altitude = calcAltitude(p, p0, T0);
+    const sampleTime = data.time - (PRESSURE_COUNT - 1 - i) * PRESSURE_DT;
+
+    altitudeChart.data.labels.push(sampleTime.toFixed(2));
+    altitudeChart.data.datasets[0].data.push(altitude);
+  }
+
+  while (altitudeChart.data.labels.length > MAX_POINTS) {
+    altitudeChart.data.labels.shift();
+    altitudeChart.data.datasets[0].data.shift();
+  }
+
+  altitudeChart.update("none");
+}
+
+// --------------------
+// テレメトリ処理
+// --------------------
+function handleTelemetry(data: TelemetryData, rawLine: string): void {
+  setText(rawLineEl, rawLine);
+  setText(seqEl, String(data.seq));
+  setText(tempEl, `${formatNum(data.temperature, 2)} °C`);
+  setText(latEl, formatNum(data.lat, 6));
+  setText(lonEl, formatNum(data.lon, 6));
+  setText(rssiEl, `${formatNum(data.rssi, 0)} dBm`);
+
+  updateBaseline(data);
+
+  if (!baselineStarted) {
+    setText(statusEl, "Status: Waiting for sequence 2");
+    setText(altitudeEl, "--");
+    return;
+  }
+
+  if (!baselineFixed) {
+    setText(altitudeEl, "--");
+    return;
+  }
+
+  appendPacketToAltitudeGraph(data);
+
+  const latestPressure = data.pressures[data.pressures.length - 1];
+  const latestAltitude = calcAltitude(latestPressure, p0, T0);
+  setText(altitudeEl, `${formatNum(latestAltitude, 2)} m`);
+}
+
+// --------------------
+// ポート一覧更新
+// listPorts() は
+// [{ path: string, manufacturer: string }, ...]
+// を返す
+// --------------------
+async function refreshPorts(): Promise<void> {
+  if (!portSelect) return;
+
+  try {
+    const ports = await window.api.listPorts();
+    portSelect.innerHTML = "";
+
+    for (const port of ports) {
+      const option = document.createElement("option");
+      option.value = port.path;
+      option.textContent = port.manufacturer
+        ? `${port.path} (${port.manufacturer})`
+        : port.path;
+      portSelect.appendChild(option);
+    }
+
+    if (ports.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No ports";
+      portSelect.appendChild(option);
+    }
+  } catch (err) {
+    console.error(err);
+    setText(statusEl, "Status: Failed to list ports");
+  }
+}
+
+// --------------------
+// 接続
+// --------------------
+async function connectSerial(): Promise<void> {
+  if (!portSelect || !baudInput) return;
+
+  const path = portSelect.value;
+  const baudRate = Number(baudInput.value);
+
+  if (!path) {
+    setText(statusEl, "Status: Select a serial port");
+    return;
+  }
+
+  if (!Number.isFinite(baudRate) || baudRate <= 0) {
+    setText(statusEl, "Status: Invalid baud rate");
+    return;
+  }
+
+  try {
+    const result = await window.api.connect(path, baudRate);
+
+    if (result.ok) {
+      setText(statusEl, "Status: Connected");
+    } else {
+      setText(statusEl, `Status: Connection failed - ${result.message ?? ""}`);
+    }
+  } catch (err) {
+    console.error(err);
+    setText(statusEl, "Status: Connection failed");
+  }
+}
+
+// --------------------
+// 切断
+// --------------------
+async function disconnectSerial(): Promise<void> {
+  try {
+    const result = await window.api.disconnect();
+
+    if (result.ok) {
+      setText(statusEl, "Status: Disconnected");
+    } else {
+      setText(statusEl, "Status: Disconnect failed");
+    }
+  } catch (err) {
+    console.error(err);
+    setText(statusEl, "Status: Disconnect failed");
+  }
+}
+
+// --------------------
+// 初期化
+// --------------------
+function init(): void {
+  createAltitudeChart();
+  refreshPorts();
+
+  refreshBtn?.addEventListener("click", () => {
+    void refreshPorts();
   });
 
-  api.onLine((line: string) => {
-    if (rawEl) rawEl.textContent = line;
-
-    const { p, t, a } = parseLine(line);
-
-    // 数値表示
-    if (typeof p === "number" && Number.isFinite(p) && pEl) pEl.textContent = String(Math.round(p));
-    if (typeof t === "number" && Number.isFinite(t) && tEl) tEl.textContent = t.toFixed(1);
-    if (typeof a === "number" && Number.isFinite(a)) {
-      if (aEl) aEl.textContent = a.toFixed(2);
-      pushAlt(a);
-    }
-
-    if (connected) setStatus("受信中");
+  connectBtn?.addEventListener("click", () => {
+    void connectSerial();
   });
 
-  // =============================
-  // Connect / Disconnect
-  // =============================
-  btnCon?.addEventListener("click", async () => {
-    const path = portSel?.value;
-    const baud = Number(baudInp?.value ?? "115200");
-    if (!path) return;
+  disconnectBtn?.addEventListener("click", () => {
+    void disconnectSerial();
+  });
 
-    setStatus("接続中...");
-    try {
-      const res = await api.connect(path, baud);
-      connected = !!res?.ok;
-      setStatus(connected ? "接続中（受信待ち）" : `エラー: ${res?.message ?? "connect failed"}`);
-    } catch (e: any) {
-      connected = false;
-      setStatus(`エラー: ${String(e?.message ?? e)}`);
-    } finally {
-      setButtons();
+  window.api.onLine((line: string) => {
+    const data = parseLoRaLine(line);
+    if (!data) return;
+    handleTelemetry(data, line);
+  });
+
+  window.api.onError((msg: string) => {
+    console.error("Serial error:", msg);
+    setText(statusEl, `Status: Error - ${msg}`);
+  });
+
+  window.api.onStatus((status: string) => {
+    if (status === "connected") {
+      setText(statusEl, "Status: Connected");
+    } else if (status === "disconnected") {
+      setText(statusEl, "Status: Disconnected");
     }
   });
 
-  btnDis?.addEventListener("click", async () => {
-    try {
-      await api.disconnect();
-    } finally {
-      connected = false;
-      setStatus("未接続");
-      setButtons();
-    }
-  });
+  setText(statusEl, "Status: Waiting for sequence 2");
+  setText(seqEl, "--");
+  setText(altitudeEl, "--");
+  setText(tempEl, "--");
+  setText(latEl, "--");
+  setText(lonEl, "--");
+  setText(rssiEl, "--");
+  setText(p0El, "--");
+  setText(T0El, "--");
+  setText(rawLineEl, "--");
+}
 
-  // 初期
-  setStatus("未接続");
-  setButtons();
-});
+document.addEventListener("DOMContentLoaded", init);
+
