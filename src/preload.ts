@@ -1,14 +1,20 @@
-// All of the Node.js APIs are available in the preload process.
-// It has the same sandbox as a Chrome extension.
-window.addEventListener("DOMContentLoaded", () => {
-  const replaceText = (selector: string, text: string) => {
-    const element = document.getElementById(selector);
-    if (element) {
-      element.innerText = text;
-    }
-  };
+// ★ import ではなく require を使う（エラー防止）
+const { contextBridge, ipcRenderer } = require('electron');
 
-  for (const type of ["chrome", "node", "electron"]) {
-    replaceText(`${type}-version`, process.versions[type as keyof NodeJS.ProcessVersions]);
-  }
+contextBridge.exposeInMainWorld('groundStation', {
+  listPorts: () => ipcRenderer.invoke('serial:list'),
+  connectSerial: (config: { path: string; baudRate: number }) =>
+    ipcRenderer.invoke('serial:connect', config),
+  sendSequence: (sequenceNo: number) =>
+    ipcRenderer.invoke('serial:send-sequence', sequenceNo),
+
+  onTelemetry: (callback: (data: any) => void) => {
+    // ★ TypeScriptの型エラーを防ぐために _event: any, data: any を明記
+    ipcRenderer.on('telemetry:data', (_event: any, data: any) => callback(data));
+  },
+
+  onSerialError: (callback: (message: string) => void) => {
+    // ★ こちらも型を明記
+    ipcRenderer.on('serial:error', (_event: any, message: string) => callback(message));
+  },
 });
