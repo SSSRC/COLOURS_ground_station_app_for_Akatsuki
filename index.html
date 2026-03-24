@@ -5,57 +5,70 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
   <title>Ground Station - Akatsuki</title>
   <style>
-    /* --- テーマ定義 --- */
+    /* --- テーマ定義 (変数は維持) --- */
     :root[data-theme="cyberpunk"] {
       --bg-color: #05050a; --panel-bg: rgba(15, 15, 35, 0.9); --input-bg: #000;
       --text-color: #00f3ff; --accent-color: #00f3ff; --font-main: 'Segoe UI', sans-serif;
-      --border: 2px solid #00f3ff; --shadow: 0 0 12px #00f3ff; --danger-color: #ff0055;
+      --border: 2px solid #00f3ff; --shadow: 0 0 12px #00f3ff; --danger-color: #ff0055; /* ネオンピンクレッド */
     }
     :root[data-theme="matrix"] {
       --bg-color: #000; --panel-bg: rgba(0, 15, 0, 0.9); --input-bg: #000;
       --text-color: #00ff41; --accent-color: #00ff41; --font-main: 'Courier New', monospace;
-      --border: 1px solid #00ff41; --shadow: 0 0 8px #00ff41; --danger-color: #ff0000;
+      --border: 1px solid #00ff41; --shadow: 0 0 8px #00ff41; --danger-color: #ff0000; /* マトリックスレッド */
     }
     :root[data-theme="pastel"] {
-      --bg-color: #fdfbfb; --panel-bg: #ffffff; --input-bg: #f5f7fa; /* より淡い背景へ */
+      --bg-color: #fdfbfb; --panel-bg: #ffffff; --input-bg: #f5f7fa;
       --text-color: #5a67d8; --accent-color: #a3b1ff; --font-main: 'Helvetica Neue', sans-serif;
-      --border: 2px solid #e2e8f0; --shadow: 0 4px 10px rgba(0,0,0,0.03); --danger-color: #feb2b2;
+      --border: 2px solid #e2e8f0; --shadow: 0 4px 10px rgba(0,0,0,0.03); --danger-color: #feb2b2; /* ソフトピンクレッド */
     }
 
     body { background-color: var(--bg-color); color: var(--text-color); font-family: var(--font-main); margin: 20px; padding-top: 60px; transition: 0.3s; }
     
-    /* 右上のテーマセレクター */
+    /* テーマセレクター (維持) */
     .theme-panel { position: fixed; top: 15px; right: 20px; z-index: 1000; background: var(--panel-bg); padding: 8px 12px; border: var(--border); box-shadow: var(--shadow); border-radius: 6px; font-size: 12px; }
     .theme-panel select { background: var(--input-bg); color: var(--text-color); border: 1px solid var(--accent-color); border-radius: 4px; padding: 3px; outline: none; }
 
-    /* パラメータ表示 (IDは維持、ラベルは英語) */
+    /* パラメータ表示 (ID/ラベル維持) */
     .param-container { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
     .param-box { flex: 1; min-width: 140px; padding: 15px; background: var(--panel-bg); border: var(--border); box-shadow: var(--shadow); border-radius: 8px; text-align: center; }
     .param-label { display: block; font-size: 11px; text-transform: uppercase; opacity: 0.8; letter-spacing: 1px; margin-bottom: 5px; }
     .param-val { display: block; font-weight: bold; font-size: 26px; color: var(--accent-color); }
 
-    /* グラフとログ */
+    /* グラフとログ (維持) */
     #altitudeChart { width: 100%; max-width: 1100px; height: 320px; border: var(--border); background: rgba(0,0,0,0.2); margin-bottom: 20px; border-radius: 4px; }
     #log { width: 100%; max-width: 1078px; height: 160px; background: #000; color: var(--text-color); padding: 12px; overflow-y: scroll; font-family: 'Consolas', monospace; border: var(--border); border-radius: 4px; font-size: 12px; }
 
-    /* ボタン */
+    /* 基本ボタンスタイル (維持) */
     .cmd-btn { padding: 10px 18px; margin-right: 6px; margin-bottom: 6px; font-weight: bold; background: rgba(0,0,0,0.1); color: var(--text-color); border: var(--border); box-shadow: var(--shadow); cursor: pointer; border-radius: 4px; font-size: 13px; transition: 0.2s; }
     .cmd-btn:hover { background: var(--accent-color); color: var(--bg-color); box-shadow: 0 0 15px var(--accent-color); }
     
-    .btn-danger { border-color: var(--danger-color) !important; color: var(--danger-color) !important; }
-    .btn-danger:hover { background: var(--danger-color) !important; color: #fff !important; animation: pulse-danger 1s infinite; }
+    /* --- 危険ボタンのスタイル (ここを修正) --- */
+    .btn-danger {
+      border: 2px solid var(--danger-color) !important;
+      color: var(--danger-color) !important;
+      background: rgba(255, 0, 0, 0.05);
+      /* 通常時から赤く光らせる */
+      box-shadow: 0 0 10px var(--danger-color);
+      transition: 0.1s; /* 反応を早く */
+    }
+
+    /* ホバー時は赤のみで激しく点滅 */
+    .btn-danger:hover {
+      background: var(--danger-color) !important;
+      color: #fff !important;
+      animation: pulse-danger 0.7s infinite ease-in-out; /* より早く */
+    }
 
     @keyframes pulse-danger {
-      50% { box-shadow: 0 0 20px var(--danger-color), inset 0 0 10px var(--danger-color); }
+      /* テーマカラーを介さず、赤色のみで明滅させる */
+      0% { box-shadow: 0 0 10px var(--danger-color); }
+      50% { box-shadow: 0 0 25px var(--danger-color), inset 0 0 10px var(--danger-color); }
+      100% { box-shadow: 0 0 10px var(--danger-color); }
     }
 
-    /* フォーム入力 (パステル時の色を抑制) */
-    input, select#portSelect { 
-      background: var(--input-bg); color: var(--text-color); border: var(--border); 
-      padding: 6px 10px; border-radius: 4px; outline: none;
-    }
+    /* フォーム入力 (パステル時の淡い色味を維持) */
+    input, select#portSelect { background: var(--input-bg); color: var(--text-color); border: var(--border); padding: 6px 10px; border-radius: 4px; outline: none; }
     input:focus { border-color: var(--accent-color); }
-
     h2 { margin-top: 0; font-weight: 300; letter-spacing: 2px; }
   </style>
 </head>
