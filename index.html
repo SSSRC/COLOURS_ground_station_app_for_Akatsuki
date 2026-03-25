@@ -113,7 +113,12 @@
     <input id="baudRate" type="number" value="115200" style="width: 100px;" />
     <button id="refreshPortsBtn" class="cmd-btn">REFRESH</button>
     <button id="connectBtn" class="cmd-btn" style="border-width: 3px;">CONNECT</button>
-  </div>
+    
+    <span style="margin-left: 20px; border-left: 1px solid var(--accent-color); padding-left: 20px;">
+      <input id="logFileName" type="text" placeholder="ファイル名 (空欄で自動日時)" style="width: 200px; font-size: 12px;" />
+      <button id="logBtn" class="cmd-btn">START LOG</button>
+    </span>
+    </div>
 
   <div class="param-container">
     <div class="param-box"><span class="param-label">Time [ms]</span><span id="valTime" class="param-val">-</span></div>

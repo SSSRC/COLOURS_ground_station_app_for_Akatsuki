@@ -1,6 +1,5 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// ★ "api" という正しい名前に戻しました！
 contextBridge.exposeInMainWorld("api", {
   listPorts: async () => {
     return await ipcRenderer.invoke("serial:list");
@@ -18,8 +17,16 @@ contextBridge.exposeInMainWorld("api", {
     return await ipcRenderer.invoke("serial:send-command", commandStr);
   },
 
+  // ★追加：ログ操作用の通信
+  startLog: async (customName: string) => {
+    return await ipcRenderer.invoke("serial:start-log", customName);
+  },
+  
+  stopLog: async () => {
+    return await ipcRenderer.invoke("serial:stop-log");
+  },
+
   onLine: (callback: (line: string) => void) => {
-    // _event に : any をつけてTypeScriptエラーを回避
     ipcRenderer.on("telemetry:line", (_event: any, line: string) => callback(line));
   },
 

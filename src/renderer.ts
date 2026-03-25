@@ -303,6 +303,38 @@ function init(): void {
     const phaseInput = document.getElementById("phaseInput") as HTMLInputElement | null;
     if (phaseInput) void sendCmd(`PHASE${phaseInput.value}`);
   });
+
+  // ============================================
+  // ★追加：ログ記録ボタンのイベントリスナー
+  // ============================================
+  const logBtn = document.getElementById("logBtn") as HTMLButtonElement | null;
+  const logFileNameInput = document.getElementById("logFileName") as HTMLInputElement | null;
+  let isLogging = false;
+
+  logBtn?.addEventListener("click", async () => {
+    if (!isLogging) {
+      // ログ開始
+      const customName = logFileNameInput?.value || "";
+      const res = await window.api.startLog(customName);
+      if (res.ok) {
+        isLogging = true;
+        logBtn.textContent = "STOP LOG";
+        logBtn.classList.add("btn-danger"); // 赤くして目立たせる
+        appendLog(`[System] Logging started: ${res.path}`);
+      } else {
+        appendLog(`[Error] Failed to start logging: ${res.message}`);
+      }
+    } else {
+      // ログ停止
+      const res = await window.api.stopLog();
+      if (res.ok) {
+        isLogging = false;
+        logBtn.textContent = "START LOG";
+        logBtn.classList.remove("btn-danger"); // 元の色に戻す
+        appendLog(`[System] Logging stopped.`);
+      }
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
