@@ -6,6 +6,23 @@
   <title>Ground Station - Akatsuki</title>
   <style>
     /* --- テーマ定義 --- */
+  /* グラフを囲むコンテナ（ここで高さを絶対に固定する） */
+  .chart-container {
+    position: relative; /* Chart.jsのレスポンシブ動作に必須 */
+    width: 100%;
+    max-width: 1100px;
+    height: 320px;      /* ここで高さを完全に固定 */
+    margin-bottom: 20px;
+  }
+
+  /* canvas自体には幅・高さのCSSを指定しない！ */
+  #altitudeChart {
+    background: rgba(0,0,0,0.2);
+    border: var(--border);
+    border-radius: 4px;
+    /* width: 100% や height: 100% などの指定はすべて削除してください */
+  }
+
     :root[data-theme="cyberpunk"] {
       --bg-color: #05050a; --panel-bg: rgba(15, 15, 35, 0.9); --input-bg: #000;
       --text-color: #00f3ff; --accent-color: #00f3ff; --font-main: 'Segoe UI', sans-serif;
@@ -113,7 +130,9 @@
     <div class="param-box"><span class="param-label">Ref T0</span><span id="valT0" class="param-val" style="font-size: 18px;">-</span></div>
   </div>
 
-  <canvas id="altitudeChart" width="1100" height="320"></canvas>
+  <div class="chart-container">
+    <canvas id="altitudeChart"></canvas>
+  </div>
 
   <div class="row cmd-panel" style="padding: 20px; border: var(--border); background: var(--panel-bg); border-radius: 8px;">
     <h3 style="margin-top: 0; font-size: 16px; opacity: 0.9;">UPLINK COMMAND CONTROL</h3>

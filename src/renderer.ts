@@ -115,7 +115,7 @@ function createAltitudeChart(): void {
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false,
+      maintainAspectRatio: false, // ★これが false になっていることを確認
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
