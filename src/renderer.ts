@@ -34,6 +34,8 @@ const valAltitude = document.getElementById("valAltitude");
 const valP0 = document.getElementById("valP0");
 const valT0 = document.getElementById("valT0");
 
+// ★ 復活させた生データ用枠
+const rawLineEl = document.getElementById("rawLine");
 const logEl = document.getElementById("log") as HTMLPreElement | null;
 const altitudeCanvas = document.getElementById("altitudeChart") as HTMLCanvasElement | null;
 
@@ -45,8 +47,8 @@ let baselinePacketCounter = 0;
 const baselinePressures: number[] = [];
 const baselineTemps: number[] = [];
 
-let p0 = 0;
-let T0 = 0;
+let p0 = 1013.25;
+let T0 = 15.0;
 
 function setText(el: HTMLElement | null, text: string): void {
   if (el) el.textContent = text;
@@ -82,11 +84,10 @@ function parseLoRaLine(line: string): TelemetryData | null {
   const seq = Number(parts[1]);
   const pressures = parts.slice(2, 27).map(Number);
   const temperature = Number(parts[27]);
-  const lat = Number(parts[28]); // "N/A" の場合は NaN になる
-  const lon = Number(parts[29]); // "N/A" の場合は NaN になる
+  const lat = Number(parts[28]);
+  const lon = Number(parts[29]);
   const rssi = Number(parts[30]);
 
-  // ★ 修正1：lat と lon (GPSデータ) は NaN でも許容するように、必須チェックから外す
   const requiredValues = [time, seq, ...pressures, temperature, rssi];
   if (requiredValues.some((v) => Number.isNaN(v))) return null;
   
@@ -95,6 +96,7 @@ function parseLoRaLine(line: string): TelemetryData | null {
   return { time, seq, pressures, temperature, lat, lon, rssi };
 }
 
+// ★ 元の正常な初期化ロジックに戻しました
 function createAltitudeChart(): void {
   if (!altitudeCanvas) return;
   const ChartRef = (window as any).Chart;
@@ -103,10 +105,9 @@ function createAltitudeChart(): void {
   altitudeChart = new ChartRef(altitudeCanvas, {
     type: "line",
     data: {
-      labels: [],
       datasets: [{
         label: "Altitude [m]",
-        data: [],
+        data: [], // 初期値は空の配列
         borderWidth: 2,
         pointRadius: 0,
         tension: 0,
@@ -119,8 +120,17 @@ function createAltitudeChart(): void {
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { maxTicksLimit: 10, color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
-        y: { ticks: { color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
+        x: { 
+          type: "linear", // 横軸を数値スケールに設定
+          title: { display: true, text: "Time [ms]", color: "#888" },
+          ticks: { maxTicksLimit: 10, color: "#888" }, 
+          grid: { color: "rgba(255, 255, 255, 0.1)" } 
+        },
+        y: { 
+          title: { display: true, text: "Altitude [m]", color: "#888" },
+          ticks: { color: "#888" }, 
+          grid: { color: "rgba(255, 255, 255, 0.1)" } 
+        },
       },
     },
   });
@@ -153,46 +163,48 @@ function updateBaseline(data: TelemetryData): void {
 }
 
 function appendPacketToAltitudeGraph(data: TelemetryData): void {
-  if (!altitudeChart || !baselineFixed) return;
+  if (!altitudeChart) return;
 
   for (let i = 0; i < data.pressures.length; i++) {
     const p = data.pressures[i];
     const altitude = calcAltitude(p, p0, T0);
     const sampleTime = data.time - (PRESSURE_COUNT - 1 - i) * PRESSURE_DT;
-    altitudeChart.data.labels.push(sampleTime.toFixed(2));
-    altitudeChart.data.datasets[0].data.push(altitude);
+    
+    // {x: 時間, y: 高度} の形式でデータを追加
+    altitudeChart.data.datasets[0].data.push({
+      x: sampleTime,
+      y: altitude
+    });
   }
 
-  while (altitudeChart.data.labels.length > MAX_POINTS) {
-    altitudeChart.data.labels.shift();
+  // 1200ポイントを超えたら古いデータを削除
+  while (altitudeChart.data.datasets[0].data.length > MAX_POINTS) {
     altitudeChart.data.datasets[0].data.shift();
   }
-  altitudeChart.update("none");
+  
+  altitudeChart.update();
 }
 
-function handleTelemetry(data: TelemetryData): void {
+function handleTelemetry(data: TelemetryData, rawLine: string): void {
+  // ★ ここが重要！生データは「追記」ではなく専用枠を「上書き」する（負荷小）
+  setText(rawLineEl, rawLine);
+
   const pressAvg = mean(data.pressures);
 
-  setText(valTime, String(data.time));
-  setText(valPhase, String(data.seq));
-  setText(valPressure, formatNum(pressAvg, 2));
-  setText(valTemp, formatNum(data.temperature, 2));
-  setText(valRssi, String(data.rssi));
-  
-  // ★ 修正2：NaNの場合は "N/A" として画面に表示する
-  setText(valLat, Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6));
-  setText(valLon, Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6));
+  if (valTime) valTime.textContent = String(data.time);
+  if (valPhase) valPhase.textContent = String(data.seq);
+  if (valPressure) valPressure.textContent = formatNum(pressAvg, 2);
+  if (valTemp) valTemp.textContent = formatNum(data.temperature, 2);
+  if (valRssi) valRssi.textContent = String(data.rssi);
+  if (valLat) valLat.textContent = Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6);
+  if (valLon) valLon.textContent = Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6);
 
   updateBaseline(data);
 
-  if (!baselineFixed) {
-    setText(valAltitude, "--");
-  } else {
-    appendPacketToAltitudeGraph(data);
-    const latestPressure = data.pressures[data.pressures.length - 1];
-    const latestAltitude = calcAltitude(latestPressure, p0, T0);
-    setText(valAltitude, formatNum(latestAltitude, 2));
-  }
+  appendPacketToAltitudeGraph(data);
+  const latestPressure = data.pressures[data.pressures.length - 1];
+  const latestAltitude = calcAltitude(latestPressure, p0, T0);
+  if (valAltitude) valAltitude.textContent = formatNum(latestAltitude, 2);
 }
 
 async function refreshPorts(): Promise<void> {
@@ -239,13 +251,18 @@ async function connectSerial(): Promise<void> {
   }
 }
 
+// 連打送信（バースト）
 async function sendCmd(cmdStr: string): Promise<void> {
   try {
-    const res = await window.api.sendCommand(cmdStr);
-    if (res.ok) {
-      appendLog(`[TX] Sent Command: ${cmdStr}`);
-    } else {
-      appendLog(`[TX Error] ${res.message}`);
+    appendLog(`[System] Burst-TX [${cmdStr}]`);
+    for (let i = 0; i < 3; i++) {
+      const res = await window.api.sendCommand(cmdStr);
+      if (res.ok) {
+        appendLog(`[TX] Sent: ${cmdStr} (${i + 1}/3)`);
+      } else {
+        appendLog(`[TX Error] ${res.message}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 160));
     }
   } catch (err) {
     appendLog(`[TX Error] ${String(err)}`);
@@ -253,7 +270,8 @@ async function sendCmd(cmdStr: string): Promise<void> {
 }
 
 function init(): void {
-  setTimeout(() => { createAltitudeChart(); }, 100);
+  // ★ 初期化も元のシンプルな形に戻しました
+  createAltitudeChart();
   refreshPorts();
 
   refreshBtn?.addEventListener("click", () => { void refreshPorts(); });
@@ -265,13 +283,19 @@ function init(): void {
   });
 
   window.api.onLine((line: string) => {
-    // ★ 修正3：パースに成功しようが失敗しようが、受信した文字は「絶対に」生データログに表示する
-    appendLog(`[RX] ${line}`);
+    appendLog(`[DEBUG RX] ${line}`);
+
+    // ★ パース（解析）処理の前に、まずは生データ枠へ即座に表示！
+    if (rawLineEl) {
+      rawLineEl.textContent = line;
+    }
 
     const data = parseLoRaLine(line);
-    if (!data) return; // テレメトリデータ以外（起動ログなど）はここで終了
+    // 不完全なデータの場合はここで処理を止める（生データは表示済み）
+    if (!data) return; 
     
-    handleTelemetry(data);
+    // データが完全な場合のみパラメータとグラフを更新
+    handleTelemetry(data, line); 
   });
 
   window.api.onError((msg: string) => appendLog(`[Serial Error] ${msg}`));

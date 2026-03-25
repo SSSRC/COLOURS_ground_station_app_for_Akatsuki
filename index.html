@@ -2,10 +2,9 @@
 <html lang="ja" data-theme="cyberpunk">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
   <title>Ground Station - Akatsuki</title>
   <style>
-    /* --- テーマ定義 --- */
     :root[data-theme="cyberpunk"] {
       --bg-color: #05050a; --panel-bg: rgba(15, 15, 35, 0.9); --input-bg: #000;
       --text-color: #00f3ff; --accent-color: #00f3ff; --font-main: 'Segoe UI', sans-serif;
@@ -21,7 +20,6 @@
       --text-color: #5a67d8; --accent-color: #a3b1ff; --font-main: 'Helvetica Neue', sans-serif;
       --border: 2px solid #e2e8f0; --shadow: 0 4px 10px rgba(0,0,0,0.03); --danger-color: #feb2b2;
     }
-    /* ★ 追加: 元の安定稼働版のテーマ (COLOURS) */
     :root[data-theme="colours"] {
       --bg-color: #111111; --panel-bg: #222222; --input-bg: #1a1a1a;
       --text-color: #eeeeee; --accent-color: #4fc3f7; --font-main: 'Times New Roman', serif;
@@ -30,27 +28,38 @@
 
     body { background-color: var(--bg-color); color: var(--text-color); font-family: var(--font-main); margin: 20px; padding-top: 60px; transition: 0.3s; }
     
-    /* テーマセレクター */
     .theme-panel { position: fixed; top: 15px; right: 20px; z-index: 1000; background: var(--panel-bg); padding: 8px 12px; border: var(--border); box-shadow: var(--shadow); border-radius: 6px; font-size: 12px; }
     .theme-panel select { background: var(--input-bg); color: var(--text-color); border: 1px solid var(--accent-color); border-radius: 4px; padding: 3px; outline: none; }
 
-    /* パラメータ表示 */
     .param-container { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
     .param-box { flex: 1; min-width: 130px; padding: 15px; background: var(--panel-bg); border: var(--border); box-shadow: var(--shadow); border-radius: 8px; text-align: center; }
     .param-label { display: block; font-size: 11px; text-transform: uppercase; opacity: 0.8; letter-spacing: 1px; margin-bottom: 5px; }
     .param-val { display: block; font-weight: bold; font-size: 24px; color: var(--accent-color); }
-    /* 文字数が多い緯度経度用 */
     .param-val.small-text { font-size: 18px; }
 
-    /* グラフとログ */
-    #altitudeChart { width: 100%; max-width: 1100px; height: 320px; border: var(--border); background: rgba(0,0,0,0.2); margin-bottom: 20px; border-radius: 4px; }
+    /* グラフを閉じ込める箱 */
+    .chart-wrap {
+      width: 100%;
+      max-width: 1100px;
+      height: 320px; /* ここで縦幅を320pxにガッチリ固定します */
+      margin-bottom: 20px;
+      position: relative; /* Chart.jsの暴走を防ぐために必須の指定 */
+      border: var(--border);
+      background: rgba(0,0,0,0.2);
+      border-radius: 4px;
+    }
+    
+    /* 中身のCanvasは箱に100%合わせる */
+    #altitudeChart {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
     #log { width: 100%; max-width: 1078px; height: 160px; background: #000; color: var(--text-color); padding: 12px; overflow-y: scroll; font-family: 'Consolas', monospace; border: var(--border); border-radius: 4px; font-size: 12px; }
 
-    /* 基本ボタンスタイル */
     .cmd-btn { padding: 10px 18px; margin-right: 6px; margin-bottom: 6px; font-weight: bold; background: rgba(0,0,0,0.1); color: var(--text-color); border: var(--border); box-shadow: var(--shadow); cursor: pointer; border-radius: 4px; font-size: 13px; transition: 0.2s; }
     .cmd-btn:hover { background: var(--accent-color); color: var(--bg-color); box-shadow: 0 0 15px var(--accent-color); }
     
-    /* 危険ボタンのスタイル */
     .btn-danger {
       border: 2px solid var(--danger-color) !important;
       color: var(--danger-color) !important;
@@ -58,7 +67,6 @@
       box-shadow: 0 0 10px var(--danger-color);
       transition: 0.1s;
     }
-
     .btn-danger:hover {
       background: var(--danger-color) !important;
       color: #fff !important;
@@ -71,7 +79,6 @@
       100% { box-shadow: 0 0 10px var(--danger-color); }
     }
 
-    /* フォーム入力 */
     input, select#portSelect { background: var(--input-bg); color: var(--text-color); border: var(--border); padding: 6px 10px; border-radius: 4px; outline: none; }
     input:focus { border-color: var(--accent-color); }
     h2 { margin-top: 0; font-weight: 300; letter-spacing: 2px; }
@@ -103,17 +110,17 @@
     <div class="param-box"><span class="param-label">Phase</span><span id="valPhase" class="param-val">-</span></div>
     <div class="param-box"><span class="param-label">Press [hPa]</span><span id="valPressure" class="param-val">-</span></div>
     <div class="param-box"><span class="param-label">Temp [°C]</span><span id="valTemp" class="param-val">-</span></div>
-    
     <div class="param-box"><span class="param-label">RSSI [dBm]</span><span id="valRssi" class="param-val">-</span></div>
     <div class="param-box"><span class="param-label">Lat</span><span id="valLat" class="param-val small-text">-</span></div>
     <div class="param-box"><span class="param-label">Lon</span><span id="valLon" class="param-val small-text">-</span></div>
-
     <div class="param-box" style="border-color: var(--danger-color);"><span class="param-label">Alt [m]</span><span id="valAltitude" class="param-val" style="color: var(--danger-color);">-</span></div>
     <div class="param-box"><span class="param-label">Ref P0</span><span id="valP0" class="param-val" style="font-size: 18px;">-</span></div>
     <div class="param-box"><span class="param-label">Ref T0</span><span id="valT0" class="param-val" style="font-size: 18px;">-</span></div>
   </div>
 
-  <canvas id="altitudeChart" width="1100" height="320"></canvas>
+  <div class="chart-wrap">
+    <canvas id="altitudeChart"></canvas>
+  </div>
 
   <div class="row cmd-panel" style="padding: 20px; border: var(--border); background: var(--panel-bg); border-radius: 8px;">
     <h3 style="margin-top: 0; font-size: 16px; opacity: 0.9;">UPLINK COMMAND CONTROL</h3>
@@ -132,11 +139,16 @@
   </div>
 
   <div class="row" style="margin-top: 20px;">
-    <h3 style="font-size: 14px; margin-bottom: 8px; opacity: 0.8;">LIVE DATA STREAM</h3>
+    <h3 style="font-size: 14px; margin-bottom: 8px; opacity: 0.8;">LATEST RAW DATA</h3>
+    <div id="rawLine" style="background: rgba(0,0,0,0.5); border: var(--border); padding: 10px; font-family: monospace; font-size: 13px; word-break: break-all; border-radius: 4px;">--</div>
+  </div>
+
+  <div class="row" style="margin-top: 20px;">
+    <h3 style="font-size: 14px; margin-bottom: 8px; opacity: 0.8;">SYSTEM LOG</h3>
     <pre id="log">=== STANDBY ===</pre>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script type="module" src="dist/renderer.js"></script>
+  <script src="dist/renderer.js"></script>
 </body>
 </html>
