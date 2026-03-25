@@ -1,227 +1,308 @@
-console.log("★★★ 画面のプログラムが正常に読み込まれました！ ★★★");
-
-interface Window {
-  groundStation: {
-    listPorts: () => Promise<Array<{ path: string; friendlyName?: string }>>;
-    connectSerial: (config: { path: string; baudRate: number }) => Promise<{ ok: boolean }>;
-    sendCommand: (commandStr: string) => Promise<{ ok: boolean; command?: string; message?: string }>;
-    onTelemetry: (callback: (rawData: string) => void) => void;
-    onSerialError: (callback: (message: string) => void) => void;
-  };
-}
-
-const portSelect = document.getElementById("portSelect") as HTMLSelectElement;
-const baudRateInput = document.getElementById("baudRate") as HTMLInputElement;
-const log = document.getElementById("log") as HTMLPreElement;
-const canvas = document.getElementById("altitudeChart") as HTMLCanvasElement;
-const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-
-// パラメータ表示用要素
-const valTime = document.getElementById("valTime") as HTMLSpanElement;
-const valPhase = document.getElementById("valPhase") as HTMLSpanElement;
-const valPressure = document.getElementById("valPressure") as HTMLSpanElement;
-const valTemp = document.getElementById("valTemp") as HTMLSpanElement;
-const valAltitude = document.getElementById("valAltitude") as HTMLSpanElement;
-const valP0 = document.getElementById("valP0") as HTMLSpanElement;
-const valT0 = document.getElementById("valT0") as HTMLSpanElement;
-
-const phaseInput = document.getElementById("phaseInput") as HTMLInputElement;
-
-// グラフ描画用データ
-type ChartPoint = { timeMs: number; altitude: number; phase: number; };
-const points: ChartPoint[] = [];
-const MAX_POINTS = 500;
-
-// フェーズごとの平均値を記録するオブジェクト (0, 1, 2 のみ)
-type PhaseAccumulator = { pressureSum: number; temperatureSum: number; count: number; };
-const phaseStats: Record<number, PhaseAccumulator> = {
-  0: { pressureSum: 0, temperatureSum: 0, count: 0 },
-  1: { pressureSum: 0, temperatureSum: 0, count: 0 },
-  2: { pressureSum: 0, temperatureSum: 0, count: 0 },
+type TelemetryData = {
+  time: number;
+  seq: number;
+  pressures: number[];
+  temperature: number;
+  lat: number;
+  lon: number;
+  rssi: number;
 };
 
+type ChartLike = any;
+
+const MAX_POINTS = 1200;
+const PRESSURE_COUNT = 25;
+const PRESSURE_DT = 0.02;
+const BASELINE_PACKET_COUNT = 10;
+
+let altitudeChart: ChartLike | null = null;
+
+// DOM Elements
+const portSelect = document.getElementById("portSelect") as HTMLSelectElement | null;
+const baudInput = document.getElementById("baudRate") as HTMLInputElement | null;
+const refreshBtn = document.getElementById("refreshPortsBtn") as HTMLButtonElement | null;
+const connectBtn = document.getElementById("connectBtn") as HTMLButtonElement | null;
+
+const valTime = document.getElementById("valTime");
+const valPhase = document.getElementById("valPhase");
+const valPressure = document.getElementById("valPressure");
+const valTemp = document.getElementById("valTemp");
+const valRssi = document.getElementById("valRssi");
+const valLat = document.getElementById("valLat");
+const valLon = document.getElementById("valLon");
+const valAltitude = document.getElementById("valAltitude");
+const valP0 = document.getElementById("valP0");
+const valT0 = document.getElementById("valT0");
+
+const logEl = document.getElementById("log") as HTMLPreElement | null;
+const altitudeCanvas = document.getElementById("altitudeChart") as HTMLCanvasElement | null;
+
+// 基準値管理
+let baselineStarted = false;
+let baselineFixed = false;
+let baselinePacketCounter = 0;
+
+const baselinePressures: number[] = [];
+const baselineTemps: number[] = [];
+
+let p0 = 0;
+let T0 = 0;
+
+function setText(el: HTMLElement | null, text: string): void {
+  if (el) el.textContent = text;
+}
+
+function mean(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function formatNum(x: number, digits = 2): string {
+  return Number.isFinite(x) ? x.toFixed(digits) : "--";
+}
+
 function appendLog(text: string): void {
-  log.textContent += text + "\n";
-  log.scrollTop = log.scrollHeight;
+  if (logEl) {
+    logEl.textContent += text + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function calcAltitude(p: number, p0val: number, T0val: number): number {
+  if (!Number.isFinite(p) || !Number.isFinite(p0val) || !Number.isFinite(T0val)) return NaN;
+  if (p <= 0 || p0val <= 0) return NaN;
+  return ((T0val + 273.15) / 0.0065) * (1 - Math.pow(p / p0val, 1 / 5.257));
+}
+
+function parseLoRaLine(line: string): TelemetryData | null {
+  const parts = line.trim().split(",");
+  if (parts.length !== 31) return null;
+
+  const time = Number(parts[0]);
+  const seq = Number(parts[1]);
+  const pressures = parts.slice(2, 27).map(Number);
+  const temperature = Number(parts[27]);
+  const lat = Number(parts[28]); // "N/A" の場合は NaN になる
+  const lon = Number(parts[29]); // "N/A" の場合は NaN になる
+  const rssi = Number(parts[30]);
+
+  // ★ 修正1：lat と lon (GPSデータ) は NaN でも許容するように、必須チェックから外す
+  const requiredValues = [time, seq, ...pressures, temperature, rssi];
+  if (requiredValues.some((v) => Number.isNaN(v))) return null;
+  
+  if (pressures.length !== PRESSURE_COUNT) return null;
+
+  return { time, seq, pressures, temperature, lat, lon, rssi };
+}
+
+function createAltitudeChart(): void {
+  if (!altitudeCanvas) return;
+  const ChartRef = (window as any).Chart;
+  if (!ChartRef) return;
+
+  altitudeChart = new ChartRef(altitudeCanvas, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        label: "Altitude [m]",
+        data: [],
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0,
+        borderColor: "#ff0055",
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
+        y: { ticks: { color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
+      },
+    },
+  });
+}
+
+function updateBaseline(data: TelemetryData): void {
+  if (!baselineStarted && data.seq === 2) {
+    baselineStarted = true;
+    baselineFixed = false;
+    baselinePacketCounter = 0;
+    baselinePressures.length = 0;
+    baselineTemps.length = 0;
+    appendLog("[System] Sequence 2 detected. Collecting baseline...");
+  }
+
+  if (baselineStarted && !baselineFixed) {
+    baselinePressures.push(...data.pressures);
+    baselineTemps.push(data.temperature);
+    baselinePacketCounter++;
+    
+    if (baselinePacketCounter >= BASELINE_PACKET_COUNT) {
+      p0 = mean(baselinePressures);
+      T0 = mean(baselineTemps);
+      baselineFixed = true;
+      setText(valP0, formatNum(p0, 2));
+      setText(valT0, formatNum(T0, 2));
+      appendLog(`[System] Baseline fixed: P0=${formatNum(p0, 2)} hPa, T0=${formatNum(T0, 2)} °C`);
+    }
+  }
+}
+
+function appendPacketToAltitudeGraph(data: TelemetryData): void {
+  if (!altitudeChart || !baselineFixed) return;
+
+  for (let i = 0; i < data.pressures.length; i++) {
+    const p = data.pressures[i];
+    const altitude = calcAltitude(p, p0, T0);
+    const sampleTime = data.time - (PRESSURE_COUNT - 1 - i) * PRESSURE_DT;
+    altitudeChart.data.labels.push(sampleTime.toFixed(2));
+    altitudeChart.data.datasets[0].data.push(altitude);
+  }
+
+  while (altitudeChart.data.labels.length > MAX_POINTS) {
+    altitudeChart.data.labels.shift();
+    altitudeChart.data.datasets[0].data.shift();
+  }
+  altitudeChart.update("none");
+}
+
+function handleTelemetry(data: TelemetryData): void {
+  const pressAvg = mean(data.pressures);
+
+  setText(valTime, String(data.time));
+  setText(valPhase, String(data.seq));
+  setText(valPressure, formatNum(pressAvg, 2));
+  setText(valTemp, formatNum(data.temperature, 2));
+  setText(valRssi, String(data.rssi));
+  
+  // ★ 修正2：NaNの場合は "N/A" として画面に表示する
+  setText(valLat, Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6));
+  setText(valLon, Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6));
+
+  updateBaseline(data);
+
+  if (!baselineFixed) {
+    setText(valAltitude, "--");
+  } else {
+    appendPacketToAltitudeGraph(data);
+    const latestPressure = data.pressures[data.pressures.length - 1];
+    const latestAltitude = calcAltitude(latestPressure, p0, T0);
+    setText(valAltitude, formatNum(latestAltitude, 2));
+  }
 }
 
 async function refreshPorts(): Promise<void> {
-  const ports = await window.groundStation.listPorts();
-  appendLog(`[System] Ports refreshed: ${ports.length} found.`);
-  portSelect.innerHTML = "";
-  for (const p of ports) {
-    const option = document.createElement("option");
-    option.value = p.path;
-    option.textContent = p.friendlyName ? `${p.path} (${p.friendlyName})` : p.path;
-    portSelect.appendChild(option);
+  if (!portSelect) return;
+  try {
+    const ports = await window.api.listPorts();
+    portSelect.innerHTML = "";
+    for (const port of ports) {
+      const option = document.createElement("option");
+      option.value = port.path;
+      option.textContent = port.manufacturer ? `${port.path} (${port.manufacturer})` : port.path;
+      portSelect.appendChild(option);
+    }
+    if (ports.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No ports";
+      portSelect.appendChild(option);
+    }
+    appendLog("[System] Ports refreshed.");
+  } catch (err) {
+    appendLog("[Error] Failed to list ports.");
   }
 }
 
-// 高度計算 (ポアソンの式の変形)
-function calcAltitude(p: number, p0: number, T0: number): number {
-  return (T0 + 273.15) * (1 - Math.pow(p / p0, 1 / 5.257)) / 0.0065;
-}
+async function connectSerial(): Promise<void> {
+  if (!portSelect || !baudInput) return;
+  const path = portSelect.value;
+  const baudRate = Number(baudInput.value);
 
-function drawChart(): void {
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-
-  const left = 60, top = 20, right = 20, bottom = 40;
-  const chartW = w - left - right;
-  const chartH = h - top - bottom;
-
-  ctx.strokeStyle = "#ccc";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(left, top, chartW, chartH);
-
-  if (points.length < 2) {
-    ctx.fillStyle = "#aaa";
-    ctx.font = "16px sans-serif";
-    ctx.fillText("Waiting for telemetry data...", left + 20, top + 30);
+  if (!path) {
+    appendLog("[Error] Select a serial port");
     return;
   }
 
-  const minT = points[0].timeMs;
-  const maxT = points[points.length - 1].timeMs;
-  const minA = Math.min(...points.map((p) => p.altitude));
-  const maxA = Math.max(...points.map((p) => p.altitude));
-
-  const tSpan = Math.max(maxT - minT, 1);
-  let aMin = minA - 5;
-  let aMax = maxA + 10;
-  if (Math.abs(aMax - aMin) < 1e-9) { aMin -= 10; aMax += 10; }
-  const aSpan = aMax - aMin;
-
-  ctx.fillStyle = "#000";
-  ctx.font = "12px sans-serif";
-  ctx.fillText(`${minT} ms`, left, h - 10);
-  ctx.fillText(`${maxT} ms`, left + chartW - 60, h - 10);
-  ctx.fillText(`${aMax.toFixed(1)} m`, 5, top + 10);
-  ctx.fillText(`${aMin.toFixed(1)} m`, 5, top + chartH);
-
-  // 0mラインの描画
-  if (aMin < 0 && aMax > 0) {
-    const zeroY = top + chartH - ((0 - aMin) / aSpan) * chartH;
-    ctx.beginPath();
-    ctx.moveTo(left, zeroY); ctx.lineTo(left + chartW, zeroY);
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.1)"; ctx.stroke();
+  appendLog(`[System] Connecting to ${path}...`);
+  try {
+    const result = await window.api.connect(path, baudRate);
+    if (!result.ok) {
+      appendLog(`[Error] Connection failed: ${result.message}`);
+    }
+  } catch (err) {
+    appendLog(`[Error] Connection failed: ${err}`);
   }
-
-  ctx.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    const x = left + ((p.timeMs - minT) / tSpan) * chartW;
-    const y = top + chartH - ((p.altitude - aMin) / aSpan) * chartH;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.strokeStyle = "#e63946";
-  ctx.lineWidth = 2;
-  ctx.stroke();
 }
 
-// コマンド送信関数
-async function sendCmd(cmdStr: string) {
+async function sendCmd(cmdStr: string): Promise<void> {
   try {
-    const res = await window.groundStation.sendCommand(cmdStr);
-    appendLog(`[TX] Sent Command: ${cmdStr} (Result: ${res.ok ? "OK" : res.message})`);
+    const res = await window.api.sendCommand(cmdStr);
+    if (res.ok) {
+      appendLog(`[TX] Sent Command: ${cmdStr}`);
+    } else {
+      appendLog(`[TX Error] ${res.message}`);
+    }
   } catch (err) {
     appendLog(`[TX Error] ${String(err)}`);
   }
 }
 
-// UIイベント設定
-document.getElementById("refreshPortsBtn")!.addEventListener("click", refreshPorts);
+function init(): void {
+  setTimeout(() => { createAltitudeChart(); }, 100);
+  refreshPorts();
 
-document.getElementById("connectBtn")!.addEventListener("click", async () => {
-  const path = portSelect.value;
-  const baudRate = Number(baudRateInput.value);
-  if (!path) return;
-  appendLog(`[System] Connecting to ${path}...`);
-  const result = await window.groundStation.connectSerial({ path, baudRate });
-  appendLog(`[System] Connect Result: ${result.ok}`);
-});
-
-// 各コマンドボタンにイベントを割り当て
-document.querySelectorAll(".cmd-btn").forEach((btn) => {
-  if (btn.id === "sendPhaseBtn") return; // PHASE手動指定は別枠
-  btn.addEventListener("click", () => {
-    const cmd = btn.getAttribute("data-cmd");
-    if (cmd) sendCmd(cmd);
+  refreshBtn?.addEventListener("click", () => { void refreshPorts(); });
+  
+  let isConnected = false;
+  connectBtn?.addEventListener("click", async () => {
+    if (!isConnected) await connectSerial();
+    else await window.api.disconnect();
   });
-});
 
-document.getElementById("sendPhaseBtn")!.addEventListener("click", () => {
-  sendCmd(`PHASE${phaseInput.value}`);
-});
+  window.api.onLine((line: string) => {
+    // ★ 修正3：パースに成功しようが失敗しようが、受信した文字は「絶対に」生データログに表示する
+    appendLog(`[RX] ${line}`);
 
-// ===== 受信した生データを処理 =====
-window.groundStation.onTelemetry((rawData: string) => {
-  appendLog(`[RX] ${rawData}`);
+    const data = parseLoRaLine(line);
+    if (!data) return; // テレメトリデータ以外（起動ログなど）はここで終了
+    
+    handleTelemetry(data);
+  });
 
-  const parts = rawData.split(",");
-  if (parts.length < 28) return; // 最低限のデータが揃っていない場合は弾く
+  window.api.onError((msg: string) => appendLog(`[Serial Error] ${msg}`));
 
-  const timeMs = Number(parts[0]);
-  const phase = Number(parts[1]);
-  
-  // 気圧データの平均を計算 (Index 2 ~ 26 の 25個分)
-  let pressSum = 0;
-  let pressCount = 0;
-  for (let i = 2; i <= 26; i++) {
-    const pVal = Number(parts[i]);
-    if (!Number.isNaN(pVal)) {
-      pressSum += pVal;
-      pressCount++;
+  window.api.onStatus((status: string) => {
+    appendLog(`[System] Status: ${status}`);
+    if (connectBtn) {
+      if (status === "connected") {
+        isConnected = true;
+        connectBtn.textContent = "DISCONNECT";
+        connectBtn.style.borderColor = "#ff0055";
+      } else {
+        isConnected = false;
+        connectBtn.textContent = "CONNECT";
+        connectBtn.style.borderColor = "";
+      }
     }
-  }
-  if (pressCount === 0) return;
-  const currentPressure = pressSum / pressCount;
-  
-  const currentTemp = Number(parts[27]);
-  if (Number.isNaN(currentTemp)) return;
+  });
 
-  // フェーズ 0, 1, 2 の時は、基準値の統計を取り続ける
-  if (phase === 0 || phase === 1 || phase === 2) {
-    phaseStats[phase].pressureSum += currentPressure;
-    phaseStats[phase].temperatureSum += currentTemp;
-    phaseStats[phase].count += 1;
-  }
+  document.querySelectorAll(".cmd-btn").forEach((btn) => {
+    if (btn.id === "sendPhaseBtn" || btn.id === "refreshPortsBtn" || btn.id === "connectBtn") return;
+    btn.addEventListener("click", () => {
+      const cmd = btn.getAttribute("data-cmd");
+      if (cmd) void sendCmd(cmd);
+    });
+  });
 
-  // 基準値 (p0, T0) を決定
-  const refPhase = phase >= 3 ? 2 : phase;
-  const stat = phaseStats[refPhase];
-  
-  let p0 = 1013.25;
-  let T0 = 15.0;
-  
-  if (stat && stat.count > 0) {
-    // 蓄積されたデータがあればその平均を使う
-    p0 = stat.pressureSum / stat.count;
-    T0 = stat.temperatureSum / stat.count;
-  } else {
-    // もしそのフェーズのデータがまだ何も受信されていない場合は、現在の値を仮の基準にする
-    p0 = currentPressure;
-    T0 = currentTemp;
-  }
+  document.getElementById("sendPhaseBtn")?.addEventListener("click", () => {
+    const phaseInput = document.getElementById("phaseInput") as HTMLInputElement | null;
+    if (phaseInput) void sendCmd(`PHASE${phaseInput.value}`);
+  });
+}
 
-  // 高度計算
-  const altitude = calcAltitude(currentPressure, p0, T0);
-
-  // 画面の数値を更新
-  valTime.textContent = String(timeMs);
-  valPhase.textContent = String(phase);
-  valPressure.textContent = currentPressure.toFixed(2);
-  valTemp.textContent = currentTemp.toFixed(2);
-  valAltitude.textContent = altitude.toFixed(2);
-  valP0.textContent = p0.toFixed(2);
-  valT0.textContent = T0.toFixed(2);
-
-  // グラフにプロット
-  points.push({ timeMs, altitude, phase });
-  if (points.length > MAX_POINTS) points.shift();
-  drawChart();
-});
-
-window.groundStation.onSerialError((msg: string) => appendLog(`[Serial Error] ${msg}`));
-refreshPorts();
+document.addEventListener("DOMContentLoaded", init);

@@ -1,20 +1,33 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld('groundStation', {
-  listPorts: () => ipcRenderer.invoke('serial:list'),
-  connectSerial: (config: { path: string; baudRate: number }) =>
-    ipcRenderer.invoke('serial:connect', config),
-  
-  // 文字列コマンドを送信する関数
-  sendCommand: (commandStr: string) =>
-    ipcRenderer.invoke('serial:send-command', commandStr),
-
-  // 生の文字列データを受信する関数
-  onTelemetry: (callback: (rawData: string) => void) => {
-    ipcRenderer.on('telemetry:data', (_event: any, rawData: string) => callback(rawData));
+// ★ "api" という正しい名前に戻しました！
+contextBridge.exposeInMainWorld("api", {
+  listPorts: async () => {
+    return await ipcRenderer.invoke("serial:list");
   },
 
-  onSerialError: (callback: (message: string) => void) => {
-    ipcRenderer.on('serial:error', (_event: any, message: string) => callback(message));
+  connect: async (path: string, baudRate: number) => {
+    return await ipcRenderer.invoke("serial:connect", { path, baudRate });
+  },
+
+  disconnect: async () => {
+    return await ipcRenderer.invoke("serial:disconnect");
+  },
+
+  sendCommand: async (commandStr: string) => {
+    return await ipcRenderer.invoke("serial:send-command", commandStr);
+  },
+
+  onLine: (callback: (line: string) => void) => {
+    // _event に : any をつけてTypeScriptエラーを回避
+    ipcRenderer.on("telemetry:line", (_event: any, line: string) => callback(line));
+  },
+
+  onError: (callback: (msg: string) => void) => {
+    ipcRenderer.on("telemetry:error", (_event: any, msg: string) => callback(msg));
+  },
+
+  onStatus: (callback: (status: string) => void) => {
+    ipcRenderer.on("telemetry:status", (_event: any, status: string) => callback(status));
   },
 });
