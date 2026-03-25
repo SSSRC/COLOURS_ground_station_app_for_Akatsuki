@@ -47,17 +47,14 @@ async function closePortIfOpen() {
   }
 }
 
-// ★追加：重複しないファイル名を生成するヘルパー関数
+// 重複しないファイル名を生成する関数
 function getUniqueLogPath(baseName: string): string {
   const logsDir = path.join(process.cwd(), "logs");
   if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir);
   }
-
   let logPath = path.join(logsDir, `${baseName}.csv`);
   let counter = 1;
-
-  // ファイルが既に存在する場合は (1), (2)... を付与する
   while (fs.existsSync(logPath)) {
     logPath = path.join(logsDir, `${baseName}(${counter}).csv`);
     counter++;
@@ -65,16 +62,14 @@ function getUniqueLogPath(baseName: string): string {
   return logPath;
 }
 
-// ★追加：ログ開始の処理
+// ログ開始の処理
 ipcMain.handle("serial:start-log", async (_e, customName: string) => {
   if (logStream) return { ok: false, message: "Logging already started" };
 
   let baseName = customName.trim();
-  // ユーザーが拡張子「.csv」まで入力した場合は除去する
   if (baseName.toLowerCase().endsWith(".csv")) {
     baseName = baseName.slice(0, -4);
   }
-  // 空欄の場合は現在日時をファイル名にする
   if (!baseName) {
     baseName = "telemetry_" + new Date().toISOString().replace(/[:.]/g, "-");
   }
@@ -88,7 +83,7 @@ ipcMain.handle("serial:start-log", async (_e, customName: string) => {
   }
 });
 
-// ★追加：ログ停止の処理
+// ログ停止の処理
 ipcMain.handle("serial:stop-log", async () => {
   if (logStream) {
     logStream.end();
@@ -124,7 +119,6 @@ ipcMain.handle("serial:connect", async (_e, args: { path: string; baudRate: numb
     parser.on("data", (line: string) => {
       const s = (line ?? "").trim();
       if (s) {
-        // ★修正：ログ保存中（logStreamが存在する時）のみ書き込む
         if (logStream) logStream.write(s + "\n");
         sendToRenderer("telemetry:line", s);
       }
@@ -133,7 +127,6 @@ ipcMain.handle("serial:connect", async (_e, args: { path: string; baudRate: numb
     port.on("error", (err) => sendToRenderer("telemetry:error", String(err?.message ?? err)));
     port.on("close", () => {
       sendToRenderer("telemetry:status", "disconnected");
-      // 切断時にログも停止する
       if (logStream) {
         logStream.end();
         logStream = null;

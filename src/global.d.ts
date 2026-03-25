@@ -12,7 +12,7 @@ declare global {
       
       sendCommand: (cmd: string) => Promise<{ ok: boolean; message?: string }>;
       
-      // ★追加：ログ操作用のAPI
+      // ログ操作用APIを追加
       startLog: (customName: string) => Promise<{ ok: boolean; path?: string; message?: string }>;
       stopLog: () => Promise<{ ok: boolean }>;
 

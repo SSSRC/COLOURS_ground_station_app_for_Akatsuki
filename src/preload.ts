@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("api", {
     return await ipcRenderer.invoke("serial:send-command", commandStr);
   },
 
-  // ★追加：ログ操作用の通信
+  // ログ操作用の通信を追加
   startLog: async (customName: string) => {
     return await ipcRenderer.invoke("serial:start-log", customName);
   },

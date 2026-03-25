@@ -17,7 +17,6 @@ const BASELINE_PACKET_COUNT = 10;
 
 let altitudeChart: ChartLike | null = null;
 
-// DOM Elements
 const portSelect = document.getElementById("portSelect") as HTMLSelectElement | null;
 const baudInput = document.getElementById("baudRate") as HTMLInputElement | null;
 const refreshBtn = document.getElementById("refreshPortsBtn") as HTMLButtonElement | null;
@@ -37,7 +36,6 @@ const valT0 = document.getElementById("valT0");
 const logEl = document.getElementById("log") as HTMLPreElement | null;
 const altitudeCanvas = document.getElementById("altitudeChart") as HTMLCanvasElement | null;
 
-// 基準値管理
 let baselineStarted = false;
 let baselineFixed = false;
 let baselinePacketCounter = 0;
@@ -82,19 +80,18 @@ function parseLoRaLine(line: string): TelemetryData | null {
   const seq = Number(parts[1]);
   const pressures = parts.slice(2, 27).map(Number);
   const temperature = Number(parts[27]);
-  const lat = Number(parts[28]); // "N/A" の場合は NaN になる
-  const lon = Number(parts[29]); // "N/A" の場合は NaN になる
+  const lat = Number(parts[28]);
+  const lon = Number(parts[29]);
   const rssi = Number(parts[30]);
 
-  // ★ 修正1：lat と lon (GPSデータ) は NaN でも許容するように、必須チェックから外す
   const requiredValues = [time, seq, ...pressures, temperature, rssi];
   if (requiredValues.some((v) => Number.isNaN(v))) return null;
-  
   if (pressures.length !== PRESSURE_COUNT) return null;
 
   return { time, seq, pressures, temperature, lat, lon, rssi };
 }
 
+// ★ グラフの初期化（横軸を数値スケールに変更）
 function createAltitudeChart(): void {
   if (!altitudeCanvas) return;
   const ChartRef = (window as any).Chart;
@@ -103,10 +100,9 @@ function createAltitudeChart(): void {
   altitudeChart = new ChartRef(altitudeCanvas, {
     type: "line",
     data: {
-      labels: [],
       datasets: [{
         label: "Altitude [m]",
-        data: [],
+        data: [], // 空の配列として初期化
         borderWidth: 2,
         pointRadius: 0,
         tension: 0,
@@ -115,12 +111,21 @@ function createAltitudeChart(): void {
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false, // ★これが false になっていることを確認
+      maintainAspectRatio: false,
       animation: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { maxTicksLimit: 10, color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
-        y: { ticks: { color: "#888" }, grid: { color: "rgba(255, 255, 255, 0.1)" } },
+        x: { 
+          type: "linear", // ★ 横軸を数値の線形スケールに
+          title: { display: true, text: "Time [ms]", color: "#888" },
+          ticks: { maxTicksLimit: 10, color: "#888" }, 
+          grid: { color: "rgba(255, 255, 255, 0.1)" } 
+        },
+        y: { 
+          title: { display: true, text: "Altitude [m]", color: "#888" },
+          ticks: { color: "#888" }, 
+          grid: { color: "rgba(255, 255, 255, 0.1)" } 
+        },
       },
     },
   });
@@ -152,6 +157,7 @@ function updateBaseline(data: TelemetryData): void {
   }
 }
 
+// ★ グラフへのデータ追加（x, yの座標でプロット）
 function appendPacketToAltitudeGraph(data: TelemetryData): void {
   if (!altitudeChart || !baselineFixed) return;
 
@@ -159,12 +165,12 @@ function appendPacketToAltitudeGraph(data: TelemetryData): void {
     const p = data.pressures[i];
     const altitude = calcAltitude(p, p0, T0);
     const sampleTime = data.time - (PRESSURE_COUNT - 1 - i) * PRESSURE_DT;
-    altitudeChart.data.labels.push(sampleTime.toFixed(2));
-    altitudeChart.data.datasets[0].data.push(altitude);
+    
+    // x(時間), y(高度)の形式でデータをプッシュ
+    altitudeChart.data.datasets[0].data.push({ x: sampleTime, y: altitude });
   }
 
-  while (altitudeChart.data.labels.length > MAX_POINTS) {
-    altitudeChart.data.labels.shift();
+  while (altitudeChart.data.datasets[0].data.length > MAX_POINTS) {
     altitudeChart.data.datasets[0].data.shift();
   }
   altitudeChart.update("none");
@@ -178,8 +184,6 @@ function handleTelemetry(data: TelemetryData): void {
   setText(valPressure, formatNum(pressAvg, 2));
   setText(valTemp, formatNum(data.temperature, 2));
   setText(valRssi, String(data.rssi));
-  
-  // ★ 修正2：NaNの場合は "N/A" として画面に表示する
   setText(valLat, Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6));
   setText(valLon, Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6));
 
@@ -265,12 +269,10 @@ function init(): void {
   });
 
   window.api.onLine((line: string) => {
-    // ★ 修正3：パースに成功しようが失敗しようが、受信した文字は「絶対に」生データログに表示する
+    // データ解析前に必ず生データログへ出力する
     appendLog(`[RX] ${line}`);
-
     const data = parseLoRaLine(line);
-    if (!data) return; // テレメトリデータ以外（起動ログなど）はここで終了
-    
+    if (!data) return;
     handleTelemetry(data);
   });
 
@@ -292,7 +294,7 @@ function init(): void {
   });
 
   document.querySelectorAll(".cmd-btn").forEach((btn) => {
-    if (btn.id === "sendPhaseBtn" || btn.id === "refreshPortsBtn" || btn.id === "connectBtn") return;
+    if (btn.id === "sendPhaseBtn" || btn.id === "refreshPortsBtn" || btn.id === "connectBtn" || btn.id === "logBtn") return;
     btn.addEventListener("click", () => {
       const cmd = btn.getAttribute("data-cmd");
       if (cmd) void sendCmd(cmd);
@@ -304,33 +306,29 @@ function init(): void {
     if (phaseInput) void sendCmd(`PHASE${phaseInput.value}`);
   });
 
-  // ============================================
-  // ★追加：ログ記録ボタンのイベントリスナー
-  // ============================================
+  // ★ ログ記録ボタンの制御イベント
   const logBtn = document.getElementById("logBtn") as HTMLButtonElement | null;
   const logFileNameInput = document.getElementById("logFileName") as HTMLInputElement | null;
   let isLogging = false;
 
   logBtn?.addEventListener("click", async () => {
     if (!isLogging) {
-      // ログ開始
       const customName = logFileNameInput?.value || "";
       const res = await window.api.startLog(customName);
       if (res.ok) {
         isLogging = true;
         logBtn.textContent = "STOP LOG";
-        logBtn.classList.add("btn-danger"); // 赤くして目立たせる
+        logBtn.classList.add("btn-danger");
         appendLog(`[System] Logging started: ${res.path}`);
       } else {
         appendLog(`[Error] Failed to start logging: ${res.message}`);
       }
     } else {
-      // ログ停止
       const res = await window.api.stopLog();
       if (res.ok) {
         isLogging = false;
         logBtn.textContent = "START LOG";
-        logBtn.classList.remove("btn-danger"); // 元の色に戻す
+        logBtn.classList.remove("btn-danger");
         appendLog(`[System] Logging stopped.`);
       }
     }
