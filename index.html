@@ -56,7 +56,7 @@
     .param-box { flex: 1; min-width: 130px; padding: 15px; background: var(--panel-bg); border: var(--border); box-shadow: var(--shadow); border-radius: 8px; text-align: center; }
     .param-label { display: block; font-size: 11px; text-transform: uppercase; opacity: 0.8; letter-spacing: 1px; margin-bottom: 5px; }
     .param-val { display: block; font-weight: bold; font-size: 24px; color: var(--accent-color); }
-    /* 文字数が多い緯度経度用 */
+    /* 文字数が多い緯度経度用（念のため残しています） */
     .param-val.small-text { font-size: 18px; }
 
     /* グラフとログ */
@@ -127,8 +127,8 @@
     <div class="param-box"><span class="param-label">Temp [°C]</span><span id="valTemp" class="param-val">-</span></div>
     
     <div class="param-box"><span class="param-label">RSSI [dBm]</span><span id="valRssi" class="param-val">-</span></div>
-    <div class="param-box"><span class="param-label">Lat</span><span id="valLat" class="param-val small-text">-</span></div>
-    <div class="param-box"><span class="param-label">Lon</span><span id="valLon" class="param-val small-text">-</span></div>
+    
+    <div class="param-box"><span class="param-label">Deploy</span><span id="valDeploy" class="param-val">-</span></div>
 
     <div class="param-box" style="border-color: var(--danger-color);"><span class="param-label">Alt [m]</span><span id="valAltitude" class="param-val" style="color: var(--danger-color);">-</span></div>
     <div class="param-box"><span class="param-label">Ref P0</span><span id="valP0" class="param-val" style="font-size: 18px;">-</span></div>

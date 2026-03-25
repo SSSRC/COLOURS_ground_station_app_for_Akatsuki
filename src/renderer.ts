@@ -3,8 +3,9 @@ type TelemetryData = {
   seq: number;
   pressures: number[];
   temperature: number;
-  lat: number;
-  lon: number;
+  howtodeploy: number; // ★ 追加: 展開方法 (0:start, 1:pres, 2:time, 3:command)
+  //lat: number;
+  //lon: number;
   rssi: number;
 };
 
@@ -74,24 +75,27 @@ function calcAltitude(p: number, p0val: number, T0val: number): number {
 
 function parseLoRaLine(line: string): TelemetryData | null {
   const parts = line.trim().split(",");
-  if (parts.length !== 31) return null;
+  
+  // ★ CSVの項目数が30になると想定 (time(1) + state(1) + pres(25) + temp(1) + howtodeploy(1) + rssi(1))
+  if (parts.length !== 30) return null;
 
   const time = Number(parts[0]);
   const seq = Number(parts[1]);
   const pressures = parts.slice(2, 27).map(Number);
   const temperature = Number(parts[27]);
-  const lat = Number(parts[28]);
-  const lon = Number(parts[29]);
-  const rssi = Number(parts[30]);
+  const howtodeploy = Number(parts[28]); // ★ 追加: 展開方法をパース
+  //const lat = Number(parts[29]);
+  //const lon = Number(parts[30]);
+  const rssi = Number(parts[29]); // ★ rssiのインデックスを修正
 
-  const requiredValues = [time, seq, ...pressures, temperature, rssi];
+  const requiredValues = [time, seq, ...pressures, temperature, howtodeploy, rssi];
   if (requiredValues.some((v) => Number.isNaN(v))) return null;
   if (pressures.length !== PRESSURE_COUNT) return null;
 
-  return { time, seq, pressures, temperature, lat, lon, rssi };
+  return { time, seq, pressures, temperature, howtodeploy, rssi };
 }
 
-// ★ グラフの初期化（横軸を数値スケールに変更）
+// グラフの初期化（横軸を数値スケールに変更）
 function createAltitudeChart(): void {
   if (!altitudeCanvas) return;
   const ChartRef = (window as any).Chart;
@@ -116,7 +120,7 @@ function createAltitudeChart(): void {
       plugins: { legend: { display: false } },
       scales: {
         x: { 
-          type: "linear", // ★ 横軸を数値の線形スケールに
+          type: "linear", // 横軸を数値の線形スケールに
           title: { display: true, text: "Time [ms]", color: "#888" },
           ticks: { maxTicksLimit: 10, color: "#888" }, 
           grid: { color: "rgba(255, 255, 255, 0.1)" } 
@@ -157,7 +161,7 @@ function updateBaseline(data: TelemetryData): void {
   }
 }
 
-// ★ グラフへのデータ追加（x, yの座標でプロット）
+// グラフへのデータ追加（x, yの座標でプロット）
 function appendPacketToAltitudeGraph(data: TelemetryData): void {
   if (!altitudeChart || !baselineFixed) return;
 
@@ -184,8 +188,8 @@ function handleTelemetry(data: TelemetryData): void {
   setText(valPressure, formatNum(pressAvg, 2));
   setText(valTemp, formatNum(data.temperature, 2));
   setText(valRssi, String(data.rssi));
-  setText(valLat, Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6));
-  setText(valLon, Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6));
+  //setText(valLat, Number.isNaN(data.lat) ? "N/A" : data.lat.toFixed(6));
+  //setText(valLon, Number.isNaN(data.lon) ? "N/A" : data.lon.toFixed(6));
 
   updateBaseline(data);
 
@@ -306,7 +310,7 @@ function init(): void {
     if (phaseInput) void sendCmd(`PHASE${phaseInput.value}`);
   });
 
-  // ★ ログ記録ボタンの制御イベント
+  // ログ記録ボタンの制御イベント
   const logBtn = document.getElementById("logBtn") as HTMLButtonElement | null;
   const logFileNameInput = document.getElementById("logFileName") as HTMLInputElement | null;
   let isLogging = false;
