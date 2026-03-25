@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "path";
+import * as fs from "fs";
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
 
@@ -9,6 +10,7 @@ let port: SerialPort | null = null;
 let parser: ReadlineParser | null = null;
 
 let connecting = false;
+let logStream: fs.WriteStream | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -28,6 +30,11 @@ function sendToRenderer(channel: string, payload: unknown) {
 }
 
 async function closePortIfOpen() {
+  if (logStream) {
+    logStream.end();
+    logStream = null;
+  }
+
   if (parser) {
     parser.removeAllListeners();
     parser = null;
@@ -76,6 +83,15 @@ ipcMain.handle(
 
       await closePortIfOpen();
 
+      // ログファイルの準備
+      const logsDir = path.join(process.cwd(), "logs");
+      if (!fs.existsSync(logsDir)) {
+        fs.mkdirSync(logsDir);
+      }
+      const dateStr = new Date().toISOString().replace(/[:.]/g, "-");
+      const logPath = path.join(logsDir, `telemetry_${dateStr}.csv`);
+      logStream = fs.createWriteStream(logPath, { flags: "a" });
+
       port = new SerialPort({
         path: args.path,
         baudRate: args.baudRate,
@@ -90,7 +106,12 @@ ipcMain.handle(
 
       parser.on("data", (line: string) => {
         const s = (line ?? "").trim();
-        sendToRenderer("telemetry:line", s);
+        if (s) {
+          // ディスクへ直接1行書き込む（末尾に改行を足す）
+          if (logStream) logStream.write(s + "\n");
+          
+          sendToRenderer("telemetry:line", s);
+        }
       });
 
       port.on("error", (err) => {
