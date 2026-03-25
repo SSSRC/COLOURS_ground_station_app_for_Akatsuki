@@ -37,9 +37,20 @@ const logEl = document.getElementById("log") as HTMLPreElement | null;
 const altitudeCanvas = document.getElementById("altitudeChart") as HTMLCanvasElement | null;
 
 let baselineStarted = false;
-let baselineFixed = false;
-let baselinePacketCounter = 0;
 
+// --- 変更前：既存の変数を以下の新しい変数群に置き換えます ---
+let seq1BaselineStarted = false;
+let seq1BaselineFixed = false;
+let p0_seq1 = 0;
+let T0_seq1 = 0;
+
+let seq2BaselineStarted = false;
+let seq2BaselineFixed = false;
+let p0_seq2 = 0;
+let T0_seq2 = 0;
+
+let baselineFixed = false; // 現在のパケットに対して高度計算が可能かどうかのフラグ
+let baselinePacketCounter = 0;
 const baselinePressures: number[] = [];
 const baselineTemps: number[] = [];
 
@@ -131,29 +142,75 @@ function createAltitudeChart(): void {
   });
 }
 
+// --- 変更前：既存の updateBaseline 関数を以下に置き換えます ---
 function updateBaseline(data: TelemetryData): void {
-  if (!baselineStarted && data.seq === 2) {
-    baselineStarted = true;
-    baselineFixed = false;
+  // --- シーケンス1のサンプリング開始 ---
+  if (data.seq === 1 && !seq1BaselineStarted) {
+    seq1BaselineStarted = true;
     baselinePacketCounter = 0;
     baselinePressures.length = 0;
     baselineTemps.length = 0;
-    appendLog("[System] Sequence 2 detected. Collecting baseline...");
+    appendLog("[System] Sequence 1 detected. Collecting baseline 1...");
   }
 
-  if (baselineStarted && !baselineFixed) {
+  // --- シーケンス2のサンプリング開始 ---
+  if (data.seq === 2 && !seq2BaselineStarted) {
+    seq2BaselineStarted = true;
+    baselinePacketCounter = 0;
+    baselinePressures.length = 0;
+    baselineTemps.length = 0;
+    appendLog("[System] Sequence 2 detected. Collecting baseline 2...");
+  }
+
+  // --- シーケンス1のデータ収集 ---
+  if (seq1BaselineStarted && !seq1BaselineFixed && data.seq === 1) {
     baselinePressures.push(...data.pressures);
     baselineTemps.push(data.temperature);
     baselinePacketCounter++;
     
     if (baselinePacketCounter >= BASELINE_PACKET_COUNT) {
-      p0 = mean(baselinePressures);
-      T0 = mean(baselineTemps);
-      baselineFixed = true;
-      setText(valP0, formatNum(p0, 2));
-      setText(valT0, formatNum(T0, 2));
-      appendLog(`[System] Baseline fixed: P0=${formatNum(p0, 2)} hPa, T0=${formatNum(T0, 2)} °C`);
+      p0_seq1 = mean(baselinePressures);
+      T0_seq1 = mean(baselineTemps);
+      seq1BaselineFixed = true;
+      appendLog(`[System] Seq 1 Baseline fixed: P0=${formatNum(p0_seq1, 2)} hPa, T0=${formatNum(T0_seq1, 2)} °C`);
     }
+  }
+
+  // --- シーケンス2のデータ収集 ---
+  if (seq2BaselineStarted && !seq2BaselineFixed && data.seq === 2) {
+    baselinePressures.push(...data.pressures);
+    baselineTemps.push(data.temperature);
+    baselinePacketCounter++;
+    
+    if (baselinePacketCounter >= BASELINE_PACKET_COUNT) {
+      p0_seq2 = mean(baselinePressures);
+      T0_seq2 = mean(baselineTemps);
+      seq2BaselineFixed = true;
+      appendLog(`[System] Seq 2 Baseline fixed: P0=${formatNum(p0_seq2, 2)} hPa, T0=${formatNum(T0_seq2, 2)} °C`);
+    }
+  }
+
+  // --- 現在のシーケンスに応じて、使用する基準値を切り替える ---
+  if (data.seq === 1 && seq1BaselineFixed) {
+    p0 = p0_seq1;
+    T0 = T0_seq1;
+    baselineFixed = true;
+  } else if (data.seq >= 2 && seq2BaselineFixed) {
+    p0 = p0_seq2;
+    T0 = T0_seq2;
+    baselineFixed = true;
+  } else {
+    // 基準値のサンプリング中、または未確定のシーケンスの場合は計算を保留
+    baselineFixed = false;
+  }
+
+  // --- 画面への反映 ---
+  if (baselineFixed) {
+    setText(valP0, formatNum(p0, 2));
+    setText(valT0, formatNum(T0, 2));
+  } else {
+    setText(valP0, "--");
+    setText(valT0, "--");
   }
 }
 
